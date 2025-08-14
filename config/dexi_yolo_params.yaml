@@ -1,0 +1,12 @@
+dexi_yolo_node:
+  ros__parameters:
+    # YOLO model configuration
+    model_path: "yolov8n.pt"  # Path to YOLO model file
+    
+    # Detection parameters
+    confidence_threshold: 0.5  # Confidence threshold (0.0-1.0)
+    detection_frequency: 1.0   # Detection frequency in Hz
+    
+    # Topic names (can be remapped)
+    input_image_topic: "/cam0/image_raw/compressed"
+    output_detections_topic: "/yolo_detections"
