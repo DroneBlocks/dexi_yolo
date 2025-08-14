@@ -1,7 +1,7 @@
 dexi_yolo_node:
   ros__parameters:
     # YOLO model configuration
-    model_path: "yolov8n.pt"  # Path to YOLO model file
+    model_path: "models/yolov8n.pt"  # Path to YOLO model file in package
     
     # Detection parameters
     confidence_threshold: 0.5  # Confidence threshold (0.0-1.0)

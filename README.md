@@ -1,6 +1,6 @@
-# DEXI YOLO ROS2 Package
+# Dexi YOLO ROS2 Package
 
-A ROS2 package that provides YOLO object detection capabilities by subscribing to compressed images and publishing detection results.
+A ROS2 package that provides YOLO object detection capabilities by subscribing to compressed images and publishing detection results. Designed for offline deployment on Raspberry Pi4 and other embedded systems.
 
 ## Features
 
@@ -10,6 +10,7 @@ A ROS2 package that provides YOLO object detection capabilities by subscribing t
 - Support for different YOLO model sizes (nano, small, medium, large)
 - Efficient image processing with frequency control
 - JSON-formatted detection output with bounding box coordinates
+- **Offline-ready**: Models included in package for Pi4 deployment without internet access
 
 ## Package Structure
 
@@ -17,8 +18,12 @@ A ROS2 package that provides YOLO object detection capabilities by subscribing t
 dexi_yolo/
 ├── src/                        # Source code
 │   └── dexi_yolo_node.py      # Main YOLO detection node
+├── models/                     # YOLO model files (offline deployment)
+│   ├── README.md              # Model documentation
+│   ├── yolov8n.pt             # YOLOv8 Nano (recommended for Pi4)
+│   └── yolov8s.pt             # YOLOv8 Small (balanced)
 ├── launch/                     # Launch files
-│   └── dexi_yolo_launch.py    # Node launcher
+│   └── yolo_launch.py         # Node launcher
 ├── config/                     # Configuration files
 │   └── dexi_yolo_params.yaml  # Default parameters
 ├── resource/                   # ROS2 resource marker
@@ -36,6 +41,7 @@ dexi_yolo/
 
 - ROS2 Humble or later
 - Python 3.8+
+- Raspberry Pi4 (recommended) or other ARM64/x86 system
 - CUDA-capable GPU (optional, for faster inference)
 
 ### 1. Install Dependencies
@@ -49,7 +55,22 @@ sudo apt install ros-humble-cv-bridge python3-opencv
 pip3 install -r requirements.txt
 ```
 
-### 2. Build the Package
+### 2. Add YOLO Models (Required for Offline Use)
+
+Before building, download YOLO models to the `models/` directory:
+
+```bash
+# Navigate to the models directory
+cd models/
+
+# Download recommended models for Pi4
+wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
+wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt
+
+# Or manually download from: https://github.com/ultralytics/assets/releases
+```
+
+### 3. Build the Package
 
 ```bash
 # Navigate to your ROS2 workspace
@@ -70,8 +91,8 @@ source install/setup.bash
 ### Basic Usage
 
 ```bash
-# Launch the node with default parameters
-ros2 launch dexi_yolo dexi_yolo_launch.py
+# Launch the node with default parameters (uses models/yolov8n.pt)
+ros2 launch dexi_yolo yolo_launch.py
 
 # Or run the node directly
 ros2 run dexi_yolo dexi_yolo_node
@@ -80,11 +101,14 @@ ros2 run dexi_yolo dexi_yolo_node
 ### Custom Parameters
 
 ```bash
-# Launch with custom parameters
-ros2 launch dexi_yolo dexi_yolo_launch.py \
-    model_path:=yolov8s.pt \
+# Launch with custom model
+ros2 launch dexi_yolo yolo_launch.py \
+    model_path:=models/yolov8s.pt \
     confidence_threshold:=0.7 \
     detection_frequency:=2.0
+
+# Use different model
+ros2 launch dexi_yolo yolo_launch.py model_path:=models/yolov8m.pt
 ```
 
 ### Command Line Parameters
@@ -93,7 +117,7 @@ ros2 launch dexi_yolo dexi_yolo_launch.py \
 # Run with command line arguments
 ros2 run dexi_yolo dexi_yolo_node \
     --ros-args \
-    -p model_path:=yolov8m.pt \
+    -p model_path:=models/yolov8s.pt \
     -p confidence_threshold:=0.6 \
     -p detection_frequency:=1.5
 ```
@@ -104,16 +128,16 @@ ros2 run dexi_yolo dexi_yolo_node \
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `model_path` | `yolov8n.pt` | Path to YOLO model file |
+| `model_path` | `models/yolov8n.pt` | Path to YOLO model file in package |
 | `confidence_threshold` | `0.5` | Confidence threshold (0.0-1.0) |
 | `detection_frequency` | `1.0` | Detection frequency in Hz |
 
-### Model Options
+### Model Options for Pi4
 
-- `yolov8n.pt` - Nano (fastest, least accurate)
-- `yolov8s.pt` - Small (balanced)
-- `yolov8m.pt` - Medium (more accurate)
-- `yolov8l.pt` - Large (most accurate, slowest)
+- `models/yolov8n.pt` - **Nano (6MB)**: Fastest, lowest memory, recommended for Pi4
+- `models/yolov8s.pt` - **Small (22MB)**: Balanced speed/accuracy, good for Pi4
+- `models/yolov8m.pt` - **Medium (52MB)**: Higher accuracy, slower on Pi4
+- `models/yolov8l.pt` - **Large (87MB)**: Highest accuracy, may be slow on Pi4
 
 ## Topics
 
@@ -174,14 +198,29 @@ ros2 node info /dexi_yolo_node
 ros2 run dexi_yolo dexi_yolo_node --ros-args --log-level DEBUG
 ```
 
+## Pi4 Deployment
+
+### Offline Setup
+
+1. **Include models in package**: Models are automatically installed to the package's share directory
+2. **No internet required**: Package works completely offline after build
+3. **Optimized for ARM64**: YOLO models run efficiently on Pi4's ARM processor
+
+### Performance Tips for Pi4
+
+- Use `yolov8n.pt` for real-time applications (30+ FPS possible)
+- Set `detection_frequency` to 1-2 Hz for balanced performance
+- Monitor Pi4 temperature during extended use
+- Consider using a heatsink for sustained operation
+
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Model not found**: Ensure the YOLO model file exists at the specified path
+1. **Model not found**: Ensure YOLO model files are in the `models/` directory before building
 2. **Import errors**: Make sure all Python dependencies are installed
-3. **Performance issues**: Consider using a smaller model or adjusting detection frequency
-4. **Memory issues**: YOLO models can be memory-intensive; ensure sufficient RAM
+3. **Performance issues**: Use smaller models (nano/small) on Pi4
+4. **Memory issues**: YOLO models can be memory-intensive; ensure sufficient RAM (4GB+ recommended)
 
 ### Debug Mode
 
@@ -192,17 +231,17 @@ ros2 run dexi_yolo dexi_yolo_node --ros-args --log-level DEBUG
 
 ## Performance Tips
 
-- Use `yolov8n.pt` for real-time applications
-- Adjust `detection_frequency` based on your needs
-- Consider using GPU acceleration if available
+- Use `yolov8n.pt` for real-time applications on Pi4
+- Adjust `detection_frequency` based on your needs and Pi4 performance
 - Monitor system resources during operation
+- Consider using a USB3 SSD for faster model loading
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Test thoroughly
+4. Test thoroughly on target hardware
 5. Submit a pull request
 
 ## License
