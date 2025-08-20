@@ -43,27 +43,45 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('detection_frequency', 1.0)  # Hz
         self.declare_parameter('input_size', 320)  # Model input size
+        self.declare_parameter('num_threads', 2)   # Limit CPU threads
+        self.declare_parameter('nms_threshold', 0.4)  # IoU threshold for NMS
         
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
         self.confidence_threshold = self.get_parameter('confidence_threshold').value
         self.detection_frequency = self.get_parameter('detection_frequency').value
         self.input_size = self.get_parameter('input_size').value
+        self.num_threads = self.get_parameter('num_threads').value
+        self.nms_threshold = self.get_parameter('nms_threshold').value
         
         # Resolve model path to absolute path
         self.model_path = self._resolve_model_path(self.model_path)
         
-        # Initialize ONNX Runtime session
+        # Pre-allocate arrays for efficiency
+        self.input_tensor = np.zeros((1, 3, self.input_size, self.input_size), dtype=np.float32)
+        self.resized_buffer = np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8)
+        
+        # Initialize ONNX Runtime session with CPU optimization
         self.get_logger().info(f"Loading ONNX model from {self.model_path}...")
         try:
-            # Configure ONNX Runtime for optimization
-            providers = ['CPUExecutionProvider']
-            if ort.get_device() == 'GPU':
-                providers.insert(0, 'CUDAExecutionProvider')
-            
+            # Optimized session options for Pi CM4
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            
+            # Limit threads to prevent CPU oversubscription
+            sess_options.intra_op_num_threads = self.num_threads
+            sess_options.inter_op_num_threads = 1
+            
+            # Memory optimizations
+            sess_options.enable_mem_pattern = False  # Disable for lower memory
+            sess_options.enable_cpu_mem_arena = False  # Reduce memory fragmentation
+            
+            # CPU-specific provider with optimizations
+            providers = [('CPUExecutionProvider', {
+                'use_arena': False,  # Reduce memory overhead
+                'enable_cpu_mem_arena': False
+            })]
             
             self.session = ort.InferenceSession(
                 self.model_path, 
@@ -90,9 +108,9 @@ class DexiYoloOnnxNode(Node):
                 'toothbrush'
             ]
             
-            self.get_logger().info("ONNX model loaded successfully!")
+            self.get_logger().info("Optimized ONNX model loaded successfully!")
             self.get_logger().info(f"Input: {self.input_name}, Output: {self.output_name}")
-            self.get_logger().info(f"Available providers: {self.session.get_providers()}")
+            self.get_logger().info(f"CPU threads: intra={self.num_threads}, inter=1")
             
         except Exception as e:
             self.get_logger().error(f"Failed to load ONNX model: {e}")
@@ -101,7 +119,7 @@ class DexiYoloOnnxNode(Node):
         # Publishers
         self.detection_pub = self.create_publisher(
             String, 
-            '/yolo_detections_onnx', 
+            '/yolo_detections', 
             10
         )
         
@@ -121,13 +139,17 @@ class DexiYoloOnnxNode(Node):
         self.frame_count = 0
         self.detection_count = 0
         self.total_inference_time = 0.0
+        self.total_preprocess_time = 0.0
+        self.total_postprocess_time = 0.0
         
         self.get_logger().info("Dexi YOLO ONNX node initialized successfully!")
         self.get_logger().info(f"Subscribing to: /cam0/image_raw/compressed")
-        self.get_logger().info(f"Publishing to: /yolo_detections_onnx")
+        self.get_logger().info(f"Publishing to: /yolo_detections")
         self.get_logger().info(f"Detection frequency: {self.detection_frequency} Hz")
         self.get_logger().info(f"Confidence threshold: {self.confidence_threshold}")
+        self.get_logger().info(f"NMS threshold: {self.nms_threshold}")
         self.get_logger().info(f"Input size: {self.input_size}x{self.input_size}")
+        self.get_logger().info(f"CPU threads limited to: {self.num_threads}")
     
     def _resolve_model_path(self, model_path: str) -> str:
         """Resolve model path to absolute path, handling package-relative paths"""
@@ -149,31 +171,101 @@ class DexiYoloOnnxNode(Node):
         # For other relative paths, return as is (user can specify absolute paths)
         return model_path
     
-    def preprocess_image(self, image: np.ndarray) -> np.ndarray:
-        """Preprocess image for ONNX model input"""
-        # Resize image to model input size
-        resized = cv2.resize(image, (self.input_size, self.input_size))
+    def preprocess_image_optimized(self, image: np.ndarray) -> np.ndarray:
+        """Optimized image preprocessing with minimal memory allocations"""
+        # Use pre-allocated buffer for resize
+        cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer)
         
-        # Convert BGR to RGB
-        rgb_image = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        # Convert BGR to RGB in-place
+        cv2.cvtColor(self.resized_buffer, cv2.COLOR_BGR2RGB, dst=self.resized_buffer)
         
-        # Normalize to [0,1] and convert to NCHW format
-        input_tensor = rgb_image.astype(np.float32) / 255.0
-        input_tensor = np.transpose(input_tensor, (2, 0, 1))  # HWC to CHW
-        input_tensor = np.expand_dims(input_tensor, axis=0)   # Add batch dimension
+        # Efficient normalization and transpose using pre-allocated tensor
+        # Convert to float and normalize in one step
+        np.multiply(self.resized_buffer, 1.0/255.0, out=self.input_tensor[0].transpose(1, 2, 0), casting='unsafe')
         
-        return input_tensor
+        return self.input_tensor
     
-    def postprocess_detections(self, output: np.ndarray, original_shape: Tuple[int, int]) -> List[YoloDetection]:
-        """Postprocess ONNX model output to extract detections"""
+    def calculate_iou(self, box1: List[float], box2: List[float]) -> float:
+        """Calculate Intersection over Union (IoU) between two bounding boxes"""
+        x1_min, y1_min, x1_max, y1_max = box1
+        x2_min, y2_min, x2_max, y2_max = box2
+        
+        # Calculate intersection area
+        inter_x_min = max(x1_min, x2_min)
+        inter_y_min = max(y1_min, y2_min)
+        inter_x_max = min(x1_max, x2_max)
+        inter_y_max = min(y1_max, y2_max)
+        
+        if inter_x_max <= inter_x_min or inter_y_max <= inter_y_min:
+            return 0.0
+        
+        inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
+        
+        # Calculate union area
+        box1_area = (x1_max - x1_min) * (y1_max - y1_min)
+        box2_area = (x2_max - x2_min) * (y2_max - y2_min)
+        union_area = box1_area + box2_area - inter_area
+        
+        return inter_area / union_area if union_area > 0 else 0.0
+    
+    def apply_nms(self, detections: List[YoloDetection]) -> List[YoloDetection]:
+        """Apply Non-Maximum Suppression to remove duplicate detections"""
+        if len(detections) <= 1:
+            return detections
+        
+        # Sort detections by confidence (highest first)
+        detections.sort(key=lambda x: x.confidence, reverse=True)
+        
+        # Group detections by class
+        class_groups = {}
+        for detection in detections:
+            if detection.class_name not in class_groups:
+                class_groups[detection.class_name] = []
+            class_groups[detection.class_name].append(detection)
+        
+        # Apply NMS per class
+        final_detections = []
+        for class_name, class_detections in class_groups.items():
+            keep = []
+            
+            for i, detection in enumerate(class_detections):
+                should_keep = True
+                
+                # Check against all previously kept detections
+                for kept_detection in keep:
+                    iou = self.calculate_iou(detection.bbox, kept_detection.bbox)
+                    if iou > self.nms_threshold:
+                        should_keep = False
+                        break
+                
+                if should_keep:
+                    keep.append(detection)
+            
+            final_detections.extend(keep)
+        
+        return final_detections
+    
+    def postprocess_detections_optimized(self, output: np.ndarray, original_shape: Tuple[int, int]) -> List[YoloDetection]:
+        """Optimized postprocessing with NMS and reduced memory allocations"""
         detections = []
         
         # YOLOv8 output shape: (1, 84, 2100) where 84 = 4 bbox coords + 80 classes
-        output = output[0]  # Remove batch dimension: (84, 2100)
-        output = output.T   # Transpose to (2100, 84)
+        output = output[0].T  # Remove batch dimension and transpose to (2100, 84)
         
-        # Extract bounding boxes and scores
-        for detection in output:
+        # Pre-filter by confidence to reduce processing
+        max_scores = np.max(output[:, 4:], axis=1)
+        valid_indices = max_scores >= self.confidence_threshold
+        
+        if not np.any(valid_indices):
+            return detections
+        
+        # Process only valid detections
+        valid_detections = output[valid_indices]
+        orig_h, orig_w = original_shape
+        scale_x = orig_w / self.input_size
+        scale_y = orig_h / self.input_size
+        
+        for detection in valid_detections:
             # First 4 values are bbox coordinates (cx, cy, w, h)
             cx, cy, w, h = detection[:4]
             
@@ -184,31 +276,21 @@ class DexiYoloOnnxNode(Node):
             max_score_idx = np.argmax(class_scores)
             confidence = class_scores[max_score_idx]
             
-            # Filter by confidence threshold
-            if confidence < self.confidence_threshold:
-                continue
-            
             # Convert from center format to corner format
-            x1 = cx - w / 2
-            y1 = cy - h / 2
-            x2 = cx + w / 2
-            y2 = cy + h / 2
-            
-            # Normalize coordinates to original image size
-            orig_h, orig_w = original_shape
-            scale_x = orig_w / self.input_size
-            scale_y = orig_h / self.input_size
-            
-            x1 = max(0, x1 * scale_x / orig_w)
-            y1 = max(0, y1 * scale_y / orig_h)
-            x2 = min(1, x2 * scale_x / orig_w)
-            y2 = min(1, y2 * scale_y / orig_h)
+            x1 = max(0, (cx - w / 2) * scale_x / orig_w)
+            y1 = max(0, (cy - h / 2) * scale_y / orig_h)
+            x2 = min(1, (cx + w / 2) * scale_x / orig_w)
+            y2 = min(1, (cy + h / 2) * scale_y / orig_h)
             
             class_name = self.class_names[max_score_idx]
             bbox = [float(x1), float(y1), float(x2), float(y2)]
             
             detection_obj = YoloDetection(class_name, float(confidence), bbox)
             detections.append(detection_obj)
+        
+        # Apply Non-Maximum Suppression to remove duplicates
+        if len(detections) > 1:
+            detections = self.apply_nms(detections)
         
         return detections
     
@@ -233,17 +315,23 @@ class DexiYoloOnnxNode(Node):
             
             original_shape = image.shape[:2]  # (height, width)
             
-            # Run ONNX inference
-            detections = self.run_detection(image, original_shape)
+            # Run optimized detection
+            detections = self.run_detection_optimized(image, original_shape)
             
             if detections:
                 self.publish_detections(detections, msg.header)
                 self.detection_count += 1
                 
-                # Log detection results
+                # Log detection results with detailed timing
                 detection_info = [f"{d.class_name}({d.confidence:.2f})" for d in detections]
-                avg_inference_time = self.total_inference_time / self.frame_count
-                self.get_logger().info(f"Frame {self.frame_count}: {', '.join(detection_info)} (avg: {avg_inference_time*1000:.1f}ms)")
+                avg_inference = self.total_inference_time / self.frame_count * 1000
+                avg_preprocess = self.total_preprocess_time / self.frame_count * 1000
+                avg_postprocess = self.total_postprocess_time / self.frame_count * 1000
+                
+                self.get_logger().info(
+                    f"Frame {self.frame_count}: {', '.join(detection_info)} "
+                    f"(inf: {avg_inference:.1f}ms, pre: {avg_preprocess:.1f}ms, post: {avg_postprocess:.1f}ms)"
+                )
             else:
                 self.get_logger().debug(f"Frame {self.frame_count}: No objects detected")
             
@@ -252,11 +340,14 @@ class DexiYoloOnnxNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error processing image: {e}")
     
-    def run_detection(self, image: np.ndarray, original_shape: Tuple[int, int]) -> List[YoloDetection]:
-        """Run ONNX inference on the image"""
+    def run_detection_optimized(self, image: np.ndarray, original_shape: Tuple[int, int]) -> List[YoloDetection]:
+        """Run optimized ONNX inference on the image"""
         try:
-            # Preprocess image
-            input_tensor = self.preprocess_image(image)
+            # Optimized preprocessing
+            start_time = time.time()
+            input_tensor = self.preprocess_image_optimized(image)
+            preprocess_time = time.time() - start_time
+            self.total_preprocess_time += preprocess_time
             
             # Run inference
             start_time = time.time()
@@ -264,8 +355,11 @@ class DexiYoloOnnxNode(Node):
             inference_time = time.time() - start_time
             self.total_inference_time += inference_time
             
-            # Postprocess outputs
-            detections = self.postprocess_detections(outputs[0], original_shape)
+            # Optimized postprocessing
+            start_time = time.time()
+            detections = self.postprocess_detections_optimized(outputs[0], original_shape)
+            postprocess_time = time.time() - start_time
+            self.total_postprocess_time += postprocess_time
             
             return detections
             
@@ -302,13 +396,19 @@ class DexiYoloOnnxNode(Node):
     
     def get_statistics(self):
         """Get node statistics"""
-        avg_inference_time = self.total_inference_time / max(self.frame_count, 1)
+        frames = max(self.frame_count, 1)
+        avg_inference_time = self.total_inference_time / frames
+        avg_preprocess_time = self.total_preprocess_time / frames
+        avg_postprocess_time = self.total_postprocess_time / frames
+        
         return {
             'frames_processed': self.frame_count,
             'detections_made': self.detection_count,
-            'detection_rate': self.detection_count / max(self.frame_count, 1),
+            'detection_rate': self.detection_count / frames,
             'avg_inference_time_ms': avg_inference_time * 1000,
-            'total_inference_time': self.total_inference_time
+            'avg_preprocess_time_ms': avg_preprocess_time * 1000,
+            'avg_postprocess_time_ms': avg_postprocess_time * 1000,
+            'total_time': self.total_inference_time + self.total_preprocess_time + self.total_postprocess_time
         }
 
 def main(args=None):
@@ -330,7 +430,9 @@ def main(args=None):
             print(f"Detections made: {stats['detections_made']}")
             print(f"Detection rate: {stats['detection_rate']:.2f}")
             print(f"Average inference time: {stats['avg_inference_time_ms']:.1f}ms")
-            print(f"Total inference time: {stats['total_inference_time']:.2f}s")
+            print(f"Average preprocess time: {stats['avg_preprocess_time_ms']:.1f}ms")
+            print(f"Average postprocess time: {stats['avg_postprocess_time_ms']:.1f}ms")
+            print(f"Total processing time: {stats['total_time']:.2f}s")
             
             node.destroy_node()
         rclpy.shutdown()
