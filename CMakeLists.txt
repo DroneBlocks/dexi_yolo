@@ -14,9 +14,10 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 
-# Install Python executable
+# Install Python executables
 install(PROGRAMS
   src/dexi_yolo_node.py
+  src/dexi_yolo_node_onnx.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
