@@ -18,6 +18,7 @@ find_package(cv_bridge REQUIRED)
 install(PROGRAMS
   src/dexi_yolo_node.py
   src/dexi_yolo_node_onnx.py
+  src/dexi_yolo_simulator.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
