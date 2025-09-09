@@ -9,6 +9,7 @@ from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Header
 from geometry_msgs.msg import Point32
 from std_msgs.msg import String, Float32MultiArray
+from dexi_interfaces.msg import YoloDetection as YoloDetectionMsg, YoloDetectionArray
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -62,7 +63,7 @@ class DexiYoloNode(Node):
         
         # Publishers
         self.detection_pub = self.create_publisher(
-            String, 
+            YoloDetectionArray, 
             '/yolo_detections', 
             10
         )
@@ -177,24 +178,20 @@ class DexiYoloNode(Node):
             return []
     
     def publish_detections(self, detections: List[YoloDetection], header: Header):
-        """Publish detection results as JSON string"""
+        """Publish detection results using custom message type"""
         try:
-            # Convert detections to JSON-serializable format
-            detection_data = {
-                'header': {
-                    'stamp': {
-                        'sec': header.stamp.sec,
-                        'nanosec': header.stamp.nanosec
-                    },
-                    'frame_id': header.frame_id
-                },
-                'detections': [d.to_dict() for d in detections],
-                'timestamp': time.time()
-            }
-            
             # Create message
-            msg = String()
-            msg.data = json.dumps(detection_data)
+            msg = YoloDetectionArray()
+            msg.header = header
+            msg.timestamp = time.time()
+            
+            # Convert YoloDetection objects to message format
+            for detection in detections:
+                detection_msg = YoloDetectionMsg()
+                detection_msg.class_name = detection.class_name
+                detection_msg.confidence = detection.confidence
+                detection_msg.bbox = detection.bbox
+                msg.detections.append(detection_msg)
             
             # Publish
             self.detection_pub.publish(msg)
