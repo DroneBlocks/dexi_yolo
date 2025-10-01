@@ -93,19 +93,9 @@ class DexiYoloOnnxNode(Node):
             self.input_name = self.session.get_inputs()[0].name
             self.output_name = self.session.get_outputs()[0].name
             
-            # COCO class names (YOLOv8 default)
+            # Custom trained class names (exact order from training)
             self.class_names = [
-                'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
-                'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
-                'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
-                'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-                'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
-                'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-                'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
-                'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
-                'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
-                'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
-                'toothbrush'
+                'car', 'motorcycle', 'truck', 'bird', 'cat', 'dog'
             ]
             
             self.get_logger().info("Optimized ONNX model loaded successfully!")
@@ -179,9 +169,9 @@ class DexiYoloOnnxNode(Node):
         # Convert BGR to RGB in-place
         cv2.cvtColor(self.resized_buffer, cv2.COLOR_BGR2RGB, dst=self.resized_buffer)
         
-        # Efficient normalization and transpose using pre-allocated tensor
-        # Convert to float and normalize in one step
-        np.multiply(self.resized_buffer, 1.0/255.0, out=self.input_tensor[0].transpose(1, 2, 0), casting='unsafe')
+        # FIXED: Proper normalization and convert HWC to CHW format
+        normalized = self.resized_buffer.astype(np.float32) / 255.0
+        self.input_tensor[0] = normalized.transpose(2, 0, 1)  # HWC -> CHW
         
         return self.input_tensor
     
@@ -249,7 +239,7 @@ class DexiYoloOnnxNode(Node):
         """Optimized postprocessing with NMS and reduced memory allocations"""
         detections = []
         
-        # YOLOv8 output shape: (1, 84, 2100) where 84 = 4 bbox coords + 80 classes
+        # YOLOv8 output shape: (1, 10, 2100) where 10 = 4 bbox coords + 6 classes
         output = output[0].T  # Remove batch dimension and transpose to (2100, 84)
         
         # Pre-filter by confidence to reduce processing
@@ -269,9 +259,10 @@ class DexiYoloOnnxNode(Node):
             # First 4 values are bbox coordinates (cx, cy, w, h)
             cx, cy, w, h = detection[:4]
             
-            # Remaining 80 values are class scores
+            # Remaining 6 values are class scores (raw logits - need sigmoid activation)
             class_scores = detection[4:]
-            
+            class_scores = 1 / (1 + np.exp(-class_scores))  # Apply sigmoid activation
+
             # Find class with highest confidence
             max_score_idx = np.argmax(class_scores)
             confidence = class_scores[max_score_idx]
