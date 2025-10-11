@@ -1,4 +1,4 @@
-# Dexi YOLO ROS2 Package
+# DEXI YOLO ROS2 Package
 
 A ROS2 package for YOLO object detection optimized for Raspberry Pi CM4. Provides both PyTorch and ONNX Runtime implementations with desktop simulation support.
 
