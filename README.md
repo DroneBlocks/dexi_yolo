@@ -135,27 +135,41 @@ ros2 topic echo /yolo_detections
 ### Input
 - `/cam0/image_raw/compressed` - Compressed camera images
 
-### Output  
-- `/yolo_detections` - Detection results (JSON format)
+### Output
+- `/yolo_detections` - Detection results (custom `YoloDetectionArray` message type)
 
 ### Message Format
-```json
-{
-  "header": {
-    "stamp": {"sec": 1234567890, "nanosec": 123456789},
-    "frame_id": "camera_frame"
-  },
-  "detections": [
-    {
-      "class_name": "person",
-      "confidence": 0.95,
-      "bbox": [0.1, 0.2, 0.8, 0.9]
-    }
-  ],
-  "timestamp": 1234567890.123,
-  "engine": "onnx"
-}
+
+The detections are published using a custom message type from `dexi_interfaces`:
+
 ```
+# YoloDetectionArray message
+std_msgs/Header header
+float64 timestamp
+YoloDetection[] detections
+
+# YoloDetection message
+string class_name
+float32 confidence
+float32[] bbox  # [x1, y1, x2, y2] - normalized coordinates (0.0-1.0)
+```
+
+**Example:**
+```python
+header:
+  stamp: {sec: 1234567890, nanosec: 123456789}
+  frame_id: "camera_frame"
+timestamp: 1234567890.123
+detections:
+  - class_name: "cat"
+    confidence: 0.95
+    bbox: [0.1, 0.2, 0.8, 0.9]
+  - class_name: "dog"
+    confidence: 0.87
+    bbox: [0.3, 0.4, 0.7, 0.8]
+```
+
+**Note:** Requires the `dexi_interfaces` package for custom message types.
 
 ## Performance
 
