@@ -6,7 +6,8 @@ Publishes realistic detection data without requiring Pi CM4 hardware
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import String, Header
+from dexi_interfaces.msg import YoloDetection as YoloDetectionMsg, YoloDetectionArray
 import json
 import time
 import random
@@ -57,7 +58,7 @@ class YoloDetectionSimulator(Node):
         
         # Publisher
         self.detection_pub = self.create_publisher(
-            String,
+            YoloDetectionArray,
             '/yolo_detections',
             10
         )
@@ -236,26 +237,25 @@ class YoloDetectionSimulator(Node):
         # Generate detections for this frame
         detections = self.generate_detections()
         
-        # Create realistic header
-        header_data = {
-            'stamp': {
-                'sec': int(current_time),
-                'nanosec': int((current_time % 1) * 1e9)
-            },
-            'frame_id': 'camera_frame'
-        }
+        # Create message
+        msg = YoloDetectionArray()
         
-        # Create detection message (same format as real node)
-        detection_data = {
-            'header': header_data,
-            'detections': detections,
-            'timestamp': current_time,
-            'engine': 'simulator'
-        }
+        # Create realistic header
+        msg.header = Header()
+        msg.header.stamp.sec = int(current_time)
+        msg.header.stamp.nanosec = int((current_time % 1) * 1e9)
+        msg.header.frame_id = 'camera_frame'
+        msg.timestamp = current_time
+        
+        # Convert detections to message format
+        for detection in detections:
+            detection_msg = YoloDetectionMsg()
+            detection_msg.class_name = detection['class_name']
+            detection_msg.confidence = detection['confidence']
+            detection_msg.bbox = detection['bbox']
+            msg.detections.append(detection_msg)
         
         # Publish
-        msg = String()
-        msg.data = json.dumps(detection_data)
         self.detection_pub.publish(msg)
         
         # Log detection info
