@@ -84,7 +84,7 @@ class DexiYoloNode(Node):
         self.frame_count = 0
         self.detection_count = 0
         
-        self.get_logger().info("Dexi YOLO node initialized successfully!")
+        self.get_logger().info("DEXI YOLO node initialized successfully!")
         self.get_logger().info(f"Subscribing to: /cam0/image_raw/compressed")
         self.get_logger().info(f"Publishing to: /yolo_detections")
         self.get_logger().info(f"Detection frequency: {self.detection_frequency} Hz")

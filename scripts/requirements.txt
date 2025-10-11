@@ -1,0 +1,9 @@
+# Requirements for ONNX debug scripts
+# Create a virtual environment and install with:
+#   python3 -m venv venv
+#   source venv/bin/activate  # or venv\Scripts\activate on Windows
+#   pip install -r requirements.txt
+
+opencv-python>=4.8.0
+numpy>=1.24.0
+onnxruntime>=1.15.0

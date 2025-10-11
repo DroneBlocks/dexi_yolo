@@ -40,12 +40,13 @@ class DexiYoloOnnxNode(Node):
         super().__init__('dexi_yolo_onnx_node')
         
         # Parameters
-        self.declare_parameter('model_path', 'models/yolov8n.onnx')
+        self.declare_parameter('model_path', 'models/best_optimized.onnx')
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('detection_frequency', 1.0)  # Hz
-        self.declare_parameter('input_size', 320)  # Model input size
+        self.declare_parameter('input_size', 640)  # Model input size (changed from 320 to match training)
         self.declare_parameter('num_threads', 2)   # Limit CPU threads
         self.declare_parameter('nms_threshold', 0.4)  # IoU threshold for NMS
+        self.declare_parameter('use_letterbox', False)  # Use letterbox preprocessing (preserves aspect ratio)
         
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
@@ -54,6 +55,7 @@ class DexiYoloOnnxNode(Node):
         self.input_size = self.get_parameter('input_size').value
         self.num_threads = self.get_parameter('num_threads').value
         self.nms_threshold = self.get_parameter('nms_threshold').value
+        self.use_letterbox = self.get_parameter('use_letterbox').value
         
         # Resolve model path to absolute path
         self.model_path = self._resolve_model_path(self.model_path)
@@ -94,19 +96,9 @@ class DexiYoloOnnxNode(Node):
             self.input_name = self.session.get_inputs()[0].name
             self.output_name = self.session.get_outputs()[0].name
             
-            # COCO class names (YOLOv8 default)
+            # Custom trained class names (exact order from training)
             self.class_names = [
-                'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
-                'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
-                'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
-                'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-                'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
-                'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-                'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
-                'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
-                'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
-                'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
-                'toothbrush'
+                'car', 'motorcycle', 'truck', 'bird', 'cat', 'dog'
             ]
             
             self.get_logger().info("Optimized ONNX model loaded successfully!")
@@ -143,13 +135,14 @@ class DexiYoloOnnxNode(Node):
         self.total_preprocess_time = 0.0
         self.total_postprocess_time = 0.0
         
-        self.get_logger().info("Dexi YOLO ONNX node initialized successfully!")
+        self.get_logger().info("DEXI YOLO ONNX node initialized successfully!")
         self.get_logger().info(f"Subscribing to: /cam0/image_raw/compressed")
         self.get_logger().info(f"Publishing to: /yolo_detections")
         self.get_logger().info(f"Detection frequency: {self.detection_frequency} Hz")
         self.get_logger().info(f"Confidence threshold: {self.confidence_threshold}")
         self.get_logger().info(f"NMS threshold: {self.nms_threshold}")
         self.get_logger().info(f"Input size: {self.input_size}x{self.input_size}")
+        self.get_logger().info(f"Preprocessing: {'Letterbox' if self.use_letterbox else 'Simple Resize'}")
         self.get_logger().info(f"CPU threads limited to: {self.num_threads}")
     
     def _resolve_model_path(self, model_path: str) -> str:
@@ -174,16 +167,42 @@ class DexiYoloOnnxNode(Node):
     
     def preprocess_image_optimized(self, image: np.ndarray) -> np.ndarray:
         """Optimized image preprocessing with minimal memory allocations"""
-        # Use pre-allocated buffer for resize
-        cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer)
-        
-        # Convert BGR to RGB in-place
-        cv2.cvtColor(self.resized_buffer, cv2.COLOR_BGR2RGB, dst=self.resized_buffer)
-        
-        # Efficient normalization and transpose using pre-allocated tensor
-        # Convert to float and normalize in one step
-        np.multiply(self.resized_buffer, 1.0/255.0, out=self.input_tensor[0].transpose(1, 2, 0), casting='unsafe')
-        
+        if self.use_letterbox:
+            # Letterbox preprocessing: preserves aspect ratio with padding
+            orig_h, orig_w = image.shape[:2]
+
+            # Calculate scale to fit inside square while preserving aspect ratio
+            scale = min(self.input_size / orig_w, self.input_size / orig_h)
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+
+            # Resize with aspect ratio preserved
+            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            # Create padded image (letterbox) with gray padding (114 = dark gray)
+            padded = np.full((self.input_size, self.input_size, 3), 114, dtype=np.uint8)
+
+            # Calculate padding offsets (center the image)
+            top = (self.input_size - new_h) // 2
+            left = (self.input_size - new_w) // 2
+
+            padded[top:top+new_h, left:left+new_w] = resized
+
+            # Convert BGR to RGB
+            rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
+        else:
+            # Simple resize preprocessing (distorts if aspect ratio doesn't match)
+            # Use pre-allocated buffer for resize
+            cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer)
+
+            # Convert BGR to RGB in-place
+            cv2.cvtColor(self.resized_buffer, cv2.COLOR_BGR2RGB, dst=self.resized_buffer)
+            rgb = self.resized_buffer
+
+        # FIXED: Proper normalization and convert HWC to CHW format
+        normalized = rgb.astype(np.float32) / 255.0
+        self.input_tensor[0] = normalized.transpose(2, 0, 1)  # HWC -> CHW
+
         return self.input_tensor
     
     def calculate_iou(self, box1: List[float], box2: List[float]) -> float:
@@ -250,7 +269,7 @@ class DexiYoloOnnxNode(Node):
         """Optimized postprocessing with NMS and reduced memory allocations"""
         detections = []
         
-        # YOLOv8 output shape: (1, 84, 2100) where 84 = 4 bbox coords + 80 classes
+        # YOLOv8 output shape: (1, 10, 2100) where 10 = 4 bbox coords + 6 classes
         output = output[0].T  # Remove batch dimension and transpose to (2100, 84)
         
         # Pre-filter by confidence to reduce processing
@@ -270,9 +289,10 @@ class DexiYoloOnnxNode(Node):
             # First 4 values are bbox coordinates (cx, cy, w, h)
             cx, cy, w, h = detection[:4]
             
-            # Remaining 80 values are class scores
+            # Remaining 6 values are class scores (raw logits - need sigmoid activation)
             class_scores = detection[4:]
-            
+            class_scores = 1 / (1 + np.exp(-class_scores))  # Apply sigmoid activation
+
             # Find class with highest confidence
             max_score_idx = np.argmax(class_scores)
             confidence = class_scores[max_score_idx]
