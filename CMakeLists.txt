@@ -19,6 +19,7 @@ install(PROGRAMS
   src/dexi_yolo_node.py
   src/dexi_yolo_node_onnx.py
   src/dexi_yolo_simulator.py
+  src/camera_simulator_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

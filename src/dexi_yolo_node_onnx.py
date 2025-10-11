@@ -134,7 +134,7 @@ class DexiYoloOnnxNode(Node):
         self.total_preprocess_time = 0.0
         self.total_postprocess_time = 0.0
         
-        self.get_logger().info("Dexi YOLO ONNX node initialized successfully!")
+        self.get_logger().info("DEXI YOLO ONNX node initialized successfully!")
         self.get_logger().info(f"Subscribing to: /cam0/image_raw/compressed")
         self.get_logger().info(f"Publishing to: /yolo_detections")
         self.get_logger().info(f"Detection frequency: {self.detection_frequency} Hz")
