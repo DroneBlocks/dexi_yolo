@@ -429,7 +429,8 @@ class DexiYoloOnnxNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    
+    node = None
+
     try:
         node = DexiYoloOnnxNode()
         rclpy.spin(node)
@@ -438,7 +439,7 @@ def main(args=None):
     except Exception as e:
         print(f"Error: {e}")
     finally:
-        if 'node' in locals():
+        if node is not None:
             # Print final statistics
             stats = node.get_statistics()
             print(f"\nFinal Statistics (ONNX):")
@@ -449,9 +450,12 @@ def main(args=None):
             print(f"Average preprocess time: {stats['avg_preprocess_time_ms']:.1f}ms")
             print(f"Average postprocess time: {stats['avg_postprocess_time_ms']:.1f}ms")
             print(f"Total processing time: {stats['total_time']:.2f}s")
-            
+
             node.destroy_node()
-        rclpy.shutdown()
+
+        # Only shutdown if rclpy context is still valid
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
