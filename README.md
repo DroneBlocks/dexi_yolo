@@ -75,7 +75,7 @@ ros2 launch dexi_yolo yolo_onnx_launch.py
 
 # With custom parameters
 ros2 launch dexi_yolo yolo_onnx_launch.py \
-    input_size:=640 \
+    input_size:=320 \
     num_threads:=1 \
     detection_frequency:=1.0
 
@@ -114,7 +114,7 @@ ros2 topic echo /yolo_detections
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `model_path` | `models/best_optimized.onnx` | Path to ONNX model file |
-| `input_size` | `640` | Model input size (640x640 for custom model) |
+| `input_size` | `320` | Model input size (320x320 for custom model) |
 | `confidence_threshold` | `0.5` | Detection confidence threshold |
 | `detection_frequency` | `1.0` | Detection rate (Hz) |
 | `num_threads` | `2` | CPU threads (reduce for Pi, increase for desktop) |
@@ -199,7 +199,7 @@ ros2 launch dexi_yolo camera_simulator_launch.py
 # With custom video and settings
 ros2 launch dexi_yolo camera_simulator_launch.py \
     video_path:=/path/to/your/video.mp4 \
-    input_size:=640 \
+    input_size:=320 \
     use_letterbox:=true
 ```
 
@@ -214,7 +214,7 @@ ros2 run dexi_yolo camera_simulator_node.py --ros-args \
 
 # Terminal 2: Start ONNX detection node
 ros2 run dexi_yolo dexi_yolo_node_onnx --ros-args \
-    -p input_size:=640 \
+    -p input_size:=320 \
     -p use_letterbox:=false \
     -p num_threads:=4
 
