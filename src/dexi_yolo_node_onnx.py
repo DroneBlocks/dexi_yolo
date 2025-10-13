@@ -47,6 +47,8 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('num_threads', 2)   # Limit CPU threads
         self.declare_parameter('nms_threshold', 0.4)  # IoU threshold for NMS
         self.declare_parameter('use_letterbox', False)  # Use letterbox preprocessing (preserves aspect ratio)
+        self.declare_parameter('verbose_logging', False)  # Enable verbose detection logging
+        self.declare_parameter('max_detections', 10)  # Maximum detections to keep (limits processing)
         
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
@@ -56,6 +58,8 @@ class DexiYoloOnnxNode(Node):
         self.num_threads = self.get_parameter('num_threads').value
         self.nms_threshold = self.get_parameter('nms_threshold').value
         self.use_letterbox = self.get_parameter('use_letterbox').value
+        self.verbose_logging = self.get_parameter('verbose_logging').value
+        self.max_detections = self.get_parameter('max_detections').value
         
         # Resolve model path to absolute path
         self.model_path = self._resolve_model_path(self.model_path)
@@ -177,7 +181,7 @@ class DexiYoloOnnxNode(Node):
             new_h = int(orig_h * scale)
 
             # Resize with aspect ratio preserved
-            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
 
             # Create padded image (letterbox) with gray padding (114 = dark gray)
             padded = np.full((self.input_size, self.input_size, 3), 114, dtype=np.uint8)
@@ -193,7 +197,7 @@ class DexiYoloOnnxNode(Node):
         else:
             # Simple resize preprocessing (distorts if aspect ratio doesn't match)
             # Use pre-allocated buffer for resize
-            cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer)
+            cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer, interpolation=cv2.INTER_NEAREST)
 
             # Convert BGR to RGB in-place
             cv2.cvtColor(self.resized_buffer, cv2.COLOR_BGR2RGB, dst=self.resized_buffer)
@@ -312,7 +316,12 @@ class DexiYoloOnnxNode(Node):
         # Apply Non-Maximum Suppression to remove duplicates
         if len(detections) > 1:
             detections = self.apply_nms(detections)
-        
+
+        # Limit to max detections (keep highest confidence)
+        if len(detections) > self.max_detections:
+            detections.sort(key=lambda x: x.confidence, reverse=True)
+            detections = detections[:self.max_detections]
+
         return detections
     
     def image_callback(self, msg: CompressedImage):
@@ -342,19 +351,18 @@ class DexiYoloOnnxNode(Node):
             if detections:
                 self.publish_detections(detections, msg.header)
                 self.detection_count += 1
-                
-                # Log detection results with detailed timing
-                detection_info = [f"{d.class_name}({d.confidence:.2f})" for d in detections]
-                avg_inference = self.total_inference_time / self.frame_count * 1000
-                avg_preprocess = self.total_preprocess_time / self.frame_count * 1000
-                avg_postprocess = self.total_postprocess_time / self.frame_count * 1000
-                
-                self.get_logger().info(
-                    f"Frame {self.frame_count}: {', '.join(detection_info)} "
-                    f"(inf: {avg_inference:.1f}ms, pre: {avg_preprocess:.1f}ms, post: {avg_postprocess:.1f}ms)"
-                )
-            else:
-                self.get_logger().debug(f"Frame {self.frame_count}: No objects detected")
+
+                # Log detection results with detailed timing (only if verbose)
+                if self.verbose_logging:
+                    detection_info = [f"{d.class_name}({d.confidence:.2f})" for d in detections]
+                    avg_inference = self.total_inference_time / self.frame_count * 1000
+                    avg_preprocess = self.total_preprocess_time / self.frame_count * 1000
+                    avg_postprocess = self.total_postprocess_time / self.frame_count * 1000
+
+                    self.get_logger().info(
+                        f"Frame {self.frame_count}: {', '.join(detection_info)} "
+                        f"(inf: {avg_inference:.1f}ms, pre: {avg_preprocess:.1f}ms, post: {avg_postprocess:.1f}ms)"
+                    )
             
             self.last_detection_time = current_time
             
