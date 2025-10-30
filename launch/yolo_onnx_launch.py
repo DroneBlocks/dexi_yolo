@@ -3,13 +3,13 @@
 Launch file for YOLO ONNX detection node
 
 Usage:
-    # Basic (uses defaults: 640x640, custom model, simple resize)
+    # Basic (uses defaults: 320x320, custom model, simple resize)
     ros2 launch dexi_yolo yolo_onnx_launch.py
 
     # Custom model and settings
     ros2 launch dexi_yolo yolo_onnx_launch.py \
         model_path:=models/best_optimized.onnx \
-        input_size:=640 \
+        input_size:=320 \
         use_letterbox:=true
 
     # Pi CM4 optimized (lower threads, lower frequency)
@@ -38,8 +38,8 @@ def generate_launch_description():
 
     input_size_arg = DeclareLaunchArgument(
         'input_size',
-        default_value='640',
-        description='Model input size (640 for custom model, 320 for default)'
+        default_value='320',
+        description='Model input size (320x320 for custom trained model)'
     )
 
     confidence_threshold_arg = DeclareLaunchArgument(

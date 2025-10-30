@@ -43,7 +43,7 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('model_path', 'models/best_optimized.onnx')
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('detection_frequency', 1.0)  # Hz
-        self.declare_parameter('input_size', 640)  # Model input size (changed from 320 to match training)
+        self.declare_parameter('input_size', 320)  # Model input size (320x320 training)
         self.declare_parameter('num_threads', 2)   # Limit CPU threads
         self.declare_parameter('nms_threshold', 0.4)  # IoU threshold for NMS
         self.declare_parameter('use_letterbox', False)  # Use letterbox preprocessing (preserves aspect ratio)
@@ -181,7 +181,7 @@ class DexiYoloOnnxNode(Node):
             new_h = int(orig_h * scale)
 
             # Resize with aspect ratio preserved
-            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
             # Create padded image (letterbox) with gray padding (114 = dark gray)
             padded = np.full((self.input_size, self.input_size, 3), 114, dtype=np.uint8)
@@ -197,7 +197,7 @@ class DexiYoloOnnxNode(Node):
         else:
             # Simple resize preprocessing (distorts if aspect ratio doesn't match)
             # Use pre-allocated buffer for resize
-            cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer, interpolation=cv2.INTER_NEAREST)
+            cv2.resize(image, (self.input_size, self.input_size), dst=self.resized_buffer, interpolation=cv2.INTER_LINEAR)
 
             # Convert BGR to RGB in-place
             cv2.cvtColor(self.resized_buffer, cv2.COLOR_BGR2RGB, dst=self.resized_buffer)
@@ -272,44 +272,52 @@ class DexiYoloOnnxNode(Node):
     def postprocess_detections_optimized(self, output: np.ndarray, original_shape: Tuple[int, int]) -> List[YoloDetection]:
         """Optimized postprocessing with NMS and reduced memory allocations"""
         detections = []
-        
+
         # YOLOv8 output shape: (1, 10, 2100) where 10 = 4 bbox coords + 6 classes
-        output = output[0].T  # Remove batch dimension and transpose to (2100, 84)
-        
+        output = output[0].T  # Remove batch dimension and transpose to (2100, 10)
+
+        # Extract bbox and class scores
+        bbox_coords = output[:, :4]
+        class_scores = output[:, 4:]
+
+        # Apply sigmoid only if scores are raw logits (not already probabilities)
+        if class_scores.min() < 0 or class_scores.max() > 1.5:
+            class_scores = 1 / (1 + np.exp(-class_scores))
+
         # Pre-filter by confidence to reduce processing
-        max_scores = np.max(output[:, 4:], axis=1)
+        max_scores = np.max(class_scores, axis=1)
         valid_indices = max_scores >= self.confidence_threshold
-        
+
         if not np.any(valid_indices):
             return detections
-        
+
         # Process only valid detections
-        valid_detections = output[valid_indices]
+        valid_bbox = bbox_coords[valid_indices]
+        valid_scores = class_scores[valid_indices]
         orig_h, orig_w = original_shape
         scale_x = orig_w / self.input_size
         scale_y = orig_h / self.input_size
-        
-        for detection in valid_detections:
+
+        for idx in range(len(valid_bbox)):
             # First 4 values are bbox coordinates (cx, cy, w, h)
-            cx, cy, w, h = detection[:4]
-            
-            # Remaining 6 values are class scores (raw logits - need sigmoid activation)
-            class_scores = detection[4:]
-            class_scores = 1 / (1 + np.exp(-class_scores))  # Apply sigmoid activation
+            cx, cy, w, h = valid_bbox[idx]
+
+            # Class scores (already sigmoid-activated)
+            scores = valid_scores[idx]
 
             # Find class with highest confidence
-            max_score_idx = np.argmax(class_scores)
-            confidence = class_scores[max_score_idx]
-            
+            max_score_idx = np.argmax(scores)
+            confidence = scores[max_score_idx]
+
             # Convert from center format to corner format
             x1 = max(0, (cx - w / 2) * scale_x / orig_w)
             y1 = max(0, (cy - h / 2) * scale_y / orig_h)
             x2 = min(1, (cx + w / 2) * scale_x / orig_w)
             y2 = min(1, (cy + h / 2) * scale_y / orig_h)
-            
+
             class_name = self.class_names[max_score_idx]
             bbox = [float(x1), float(y1), float(x2), float(y2)]
-            
+
             detection_obj = YoloDetection(class_name, float(confidence), bbox)
             detections.append(detection_obj)
         
