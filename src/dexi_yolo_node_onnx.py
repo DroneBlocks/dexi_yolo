@@ -46,7 +46,7 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('input_size', 320)  # Model input size (320x320 training)
         self.declare_parameter('num_threads', 2)   # Limit CPU threads
         self.declare_parameter('nms_threshold', 0.4)  # IoU threshold for NMS
-        self.declare_parameter('use_letterbox', False)  # Use letterbox preprocessing (preserves aspect ratio)
+        self.declare_parameter('use_letterbox', True)  # Use letterbox preprocessing (preserves aspect ratio)
         self.declare_parameter('verbose_logging', False)  # Enable verbose detection logging
         self.declare_parameter('max_detections', 10)  # Maximum detections to keep (limits processing)
         

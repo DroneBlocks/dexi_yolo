@@ -68,7 +68,7 @@ def generate_launch_description():
 
     use_letterbox_arg = DeclareLaunchArgument(
         'use_letterbox',
-        default_value='false',
+        default_value='true',
         description='Use letterbox preprocessing (preserves aspect ratio)'
     )
 
