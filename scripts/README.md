@@ -76,7 +76,7 @@ Edit these variables in the script:
 video_path = "../test_video.mp4"            # Your MP4 file
 model_path = "../models/best_optimized.onnx"
 class_names = ['car', 'motorcycle', 'truck', 'bird', 'cat', 'dog']
-input_size = 640                            # Try 320 or 640
+input_size = 320                            # Model trained at 320x320
 conf_threshold = 0.5                        # Lower if needed (0.25)
 use_letterbox = False                       # True for letterbox padding
 max_frames = None                           # Limit frames for testing (e.g., 100)
