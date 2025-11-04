@@ -19,7 +19,7 @@ class Detection:
         self.confidence = confidence
         self.bbox = bbox  # [x1, y1, x2, y2] normalized
 
-def preprocess_frame_ros_style(frame: np.ndarray, input_size: int = 640) -> np.ndarray:
+def preprocess_frame_ros_style(frame: np.ndarray, input_size: int = 320) -> np.ndarray:
     """
     Method 1: ROS node style - simple resize
     """
@@ -40,7 +40,7 @@ def preprocess_frame_ros_style(frame: np.ndarray, input_size: int = 640) -> np.n
 
     return batch
 
-def preprocess_frame_letterbox(frame: np.ndarray, input_size: int = 640) -> Tuple[np.ndarray, dict]:
+def preprocess_frame_letterbox(frame: np.ndarray, input_size: int = 320) -> Tuple[np.ndarray, dict]:
     """
     Method 2: Ultralytics style - letterbox with aspect ratio preservation
     Returns preprocessed tensor and metadata for reverse transformation
@@ -89,7 +89,7 @@ def preprocess_frame_letterbox(frame: np.ndarray, input_size: int = 640) -> Tupl
 
 def postprocess_detections(output: np.ndarray, original_shape: Tuple[int, int],
                           class_names: List[str], conf_threshold: float = 0.5,
-                          input_size: int = 640) -> List[Detection]:
+                          input_size: int = 320) -> List[Detection]:
     """
     Process YOLO output to extract detections
     """
@@ -162,7 +162,7 @@ def draw_detections(frame: np.ndarray, detections: List[Detection]) -> np.ndarra
     return annotated
 
 def process_video(video_path: str, model_path: str, class_names: List[str],
-                 input_size: int = 640, conf_threshold: float = 0.5,
+                 input_size: int = 320, conf_threshold: float = 0.5,
                  use_letterbox: bool = True, save_output: bool = True,
                  max_frames: int = None):
     """Process video file and test ONNX inference"""
@@ -337,11 +337,11 @@ def main():
     print("=" * 70)
 
     # Configuration - MODIFY THESE
-    video_path = "dexi_test_flight.mp4"  # Your drone footage
+    video_path = "dexi_camera_all_classes.mp4"  # Your drone footage
     model_path = "models/best.onnx"
     class_names = ['car', 'motorcycle', 'truck', 'bird', 'cat', 'dog']
 
-    input_size = 640  # Try 320, 640 depending on your training
+    input_size = 320
     conf_threshold = 0.5  # Lower if needed (try 0.25)
     use_letterbox = False  # Set to True to test letterbox preprocessing
     max_frames = 3000  # Set to number to limit processing (e.g., 100 for testing)
