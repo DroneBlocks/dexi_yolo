@@ -49,6 +49,7 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('use_letterbox', True)  # Use letterbox preprocessing (preserves aspect ratio)
         self.declare_parameter('verbose_logging', False)  # Enable verbose detection logging
         self.declare_parameter('max_detections', 10)  # Maximum detections to keep (limits processing)
+        self.declare_parameter('class_names', 'car,motorcycle,truck,bird,cat,dog')  # Comma-separated class names
         
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
@@ -100,13 +101,13 @@ class DexiYoloOnnxNode(Node):
             self.input_name = self.session.get_inputs()[0].name
             self.output_name = self.session.get_outputs()[0].name
             
-            # Custom trained class names (exact order from training)
-            self.class_names = [
-                'car', 'motorcycle', 'truck', 'bird', 'cat', 'dog'
-            ]
+            # Class names from parameter (comma-separated)
+            class_names_str = self.get_parameter('class_names').value
+            self.class_names = [name.strip() for name in class_names_str.split(',')]
             
             self.get_logger().info("Optimized ONNX model loaded successfully!")
             self.get_logger().info(f"Input: {self.input_name}, Output: {self.output_name}")
+            self.get_logger().info(f"Classes: {self.class_names}")
             self.get_logger().info(f"CPU threads: intra={self.num_threads}, inter=1")
             
         except Exception as e:
