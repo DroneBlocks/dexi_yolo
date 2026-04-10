@@ -1,10 +1,10 @@
 # DEXI YOLO ROS2 Package
 
-A ROS2 package for YOLO object detection optimized for Raspberry Pi CM4. Provides both PyTorch and ONNX Runtime implementations with desktop simulation support.
+A ROS2 package for YOLO object detection optimized for Raspberry Pi. Provides PyTorch, ONNX Runtime, and Hailo 8L accelerated implementations with desktop simulation support.
 
 ## Features
 
-- **Multiple Detection Engines**: PyTorch and optimized ONNX Runtime
+- **Multiple Detection Engines**: PyTorch, ONNX Runtime, and Hailo 8L NPU
 - **Pi CM4 Optimized**: CPU thread limiting, memory optimizations, NMS
 - **Desktop Simulation**: Test without hardware using realistic detection data
 - **Offline Ready**: Models included for deployment without internet
@@ -16,6 +16,11 @@ A ROS2 package for YOLO object detection optimized for Raspberry Pi CM4. Provide
 # Real hardware (Pi CM4) - using launch files
 ros2 launch dexi_yolo yolo_onnx_launch.py  # ONNX (recommended)
 ros2 launch dexi_yolo yolo_launch.py       # PyTorch
+
+
+# Hailo 8L hardware (Pi 5 with Hailo M.2)
+ros2 launch dexi_yolo yolo_hailo_launch.py \
+    hef_path:=/home/dexi/dexi_ws/src/dexi_yolo/models/best_optimized.hef
 
 # Or run nodes directly
 ros2 run dexi_yolo dexi_yolo_node_onnx.py  # ONNX
@@ -34,10 +39,14 @@ dexi_yolo/
 │   ├── dexi_yolo_node_onnx.py      # ONNX Runtime (optimized)
 │   ├── dexi_yolo_simulator.py      # Detection simulator
 │   └── camera_simulator_node.py    # Camera/video simulator for testing
+├── hailo/
+│   ├── compile_model.sh            # ONNX → HEF compilation script
+│   └── extract_calib_frames.py     # Calibration frame extractor
 ├── models/
 │   ├── yolov8n.pt                  # PyTorch model (6MB)
 │   ├── yolov8n.onnx                # ONNX model (12MB)
-│   └── best_optimized.onnx         # Custom trained model
+│   ├── best_optimized.onnx         # Custom trained ONNX model
+│   └── best_optimized.hef          # Hailo 8L compiled model
 ├── launch/
 │   ├── yolo_launch.py              # PyTorch node launch file
 │   ├── yolo_onnx_launch.py         # ONNX node launch file (recommended)
@@ -171,6 +180,68 @@ detections:
 
 **Note:** Requires the `dexi_interfaces` package for custom message types.
 
+## Hailo 8L Model Compilation
+
+The Hailo 8L is an AI accelerator (NPU) available as an M.2 module for the Raspberry Pi 5. It runs quantized models in HEF format at much higher throughput and lower power than CPU inference.
+
+### Overview
+
+The compilation pipeline converts a trained ONNX model to Hailo's HEF format:
+
+```
+ONNX (.onnx)  -->  Parse  -->  HAR  -->  Quantize (INT8)  -->  HAR  -->  Compile  -->  HEF
+```
+
+No GPU or training is involved — this is purely a format conversion and quantization step. The Hailo Dataflow Compiler (DFC) runs on CPU and uses a calibration dataset to determine optimal INT8 quantization ranges.
+
+### Prerequisites
+
+- **Linux x86_64** (or WSL 2 on Windows)
+- **Python 3.10** (only version supported by DFC)
+- **Hailo Dataflow Compiler** — download the `.whl` from [Hailo Developer Zone](https://hailo.ai/developer-zone/) (requires free account)
+
+### Setup
+
+```bash
+# Install Python 3.10 if needed (Ubuntu)
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt install python3.10 python3.10-venv python3.10-dev
+sudo apt install graphviz libgraphviz-dev python3-tk
+
+# Create venv and install DFC
+python3.10 -m venv venv
+source venv/bin/activate
+pip install hailo_dataflow_compiler-<version>.whl
+pip install opencv-python numpy
+```
+
+### Compile
+
+```bash
+source venv/bin/activate
+cd hailo
+./compile_model.sh
+```
+
+The script will:
+1. Extract 64 calibration frames from `scripts/dexi_camera_all_classes.mp4`
+2. Parse the ONNX model into a Hailo Archive (HAR)
+3. Quantize to INT8 using the calibration data
+4. Compile to HEF for the Hailo 8L
+
+Output: `models/best_optimized.hef`
+
+### Deploy to Pi
+
+```bash
+scp models/best_optimized.hef dexi@<pi-ip>:/home/dexi/dexi_ws/src/dexi_yolo/models/
+
+# On the Pi:
+ros2 launch dexi_yolo yolo_hailo_launch.py \
+    hef_path:=/home/dexi/dexi_ws/src/dexi_yolo/models/best_optimized.hef
+```
+
+
 ## Performance
 
 ### Pi CM4 Recommendations
@@ -185,6 +256,7 @@ detections:
 | PyTorch | Higher | ~250ms | More | Full framework |
 | ONNX | Lower | ~230ms | Less | Optimized runtime |
 | Simulator | Minimal | ~1ms | Minimal | Desktop testing |
+| Hailo 8L | Minimal | TBD | Less | NPU accelerated |
 
 ## Local Testing (Desktop)
 

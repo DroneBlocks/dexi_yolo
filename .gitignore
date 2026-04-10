@@ -49,3 +49,15 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+# Hailo build artifacts
+hailo/.install_logs/
+hailo/*.log
+hailo/calib_images/
+hailo/calib_set.npy
+hailo/*.har
+venv/
+
+# Hailo compiler logs
+models/*.log
+models/*_compiled.har
