@@ -19,8 +19,7 @@ ros2 launch dexi_yolo yolo_launch.py       # PyTorch
 
 
 # Hailo 8L hardware (Pi 5 with Hailo M.2)
-ros2 launch dexi_yolo yolo_hailo_launch.py \
-    hef_path:=/home/dexi/dexi_ws/src/dexi_yolo/models/best_optimized.hef
+ros2 launch dexi_yolo yolo_hailo_launch.py
 
 # Or run nodes directly
 ros2 run dexi_yolo dexi_yolo_node_onnx.py  # ONNX
@@ -37,6 +36,7 @@ dexi_yolo/
 ├── src/
 │   ├── dexi_yolo_node.py           # PyTorch implementation
 │   ├── dexi_yolo_node_onnx.py      # ONNX Runtime (optimized)
+│   ├── dexi_yolo_node_hailo.py     # Hailo 8L accelerated inference
 │   ├── dexi_yolo_simulator.py      # Detection simulator
 │   └── camera_simulator_node.py    # Camera/video simulator for testing
 ├── hailo/
@@ -49,7 +49,8 @@ dexi_yolo/
 │   └── best_optimized.hef          # Hailo 8L compiled model
 ├── launch/
 │   ├── yolo_launch.py              # PyTorch node launch file
-│   ├── yolo_onnx_launch.py         # ONNX node launch file (recommended)
+│   ├── yolo_onnx_launch.py         # ONNX node launch file
+│   ├── yolo_hailo_launch.py        # Hailo 8L launch file (recommended for Pi 5)
 │   └── camera_simulator_launch.py  # Local testing with camera simulator
 ├── scripts/                        # Debug and testing scripts
 │   ├── debug_onnx_inference.py     # Test single image
@@ -129,6 +130,15 @@ ros2 topic echo /yolo_detections
 | `num_threads` | `2` | CPU threads (reduce for Pi, increase for desktop) |
 | `nms_threshold` | `0.4` | Non-Maximum Suppression threshold |
 | `use_letterbox` | `false` | Use letterbox preprocessing (preserves aspect ratio) |
+
+### Hailo Node Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hef_path` | `models/best_optimized.hef` | Path to Hailo HEF model (defaults to package model) |
+| `confidence_threshold` | `0.5` | Detection confidence threshold |
+| `detection_frequency` | `10.0` | Max detection rate (Hz) |
+| `class_names` | `car,motorcycle,truck,bird,cat,dog` | Comma-separated class names matching model output order |
 
 ### Simulator Parameters
 
@@ -233,12 +243,16 @@ Output: `models/best_optimized.hef`
 
 ### Deploy to Pi
 
-```bash
-scp models/best_optimized.hef dexi@<pi-ip>:/home/dexi/dexi_ws/src/dexi_yolo/models/
+The HEF model is included in the repo on this branch. On the Pi, check out the branch and rebuild:
 
-# On the Pi:
-ros2 launch dexi_yolo yolo_hailo_launch.py \
-    hef_path:=/home/dexi/dexi_ws/src/dexi_yolo/models/best_optimized.hef
+```bash
+cd ~/dexi_ws/src/dexi_yolo
+git fetch origin && git checkout feature/hailo-8l-compilation
+cd ~/dexi_ws && colcon build --packages-select dexi_yolo
+source install/setup.bash
+
+# Launch (uses best_optimized.hef by default)
+ros2 launch dexi_yolo yolo_hailo_launch.py
 ```
 
 
@@ -255,8 +269,8 @@ ros2 launch dexi_yolo yolo_hailo_launch.py \
 |--------|-----------|----------------|---------|--------|
 | PyTorch | Higher | ~250ms | More | Full framework |
 | ONNX | Lower | ~230ms | Less | Optimized runtime |
+| Hailo 8L | ~12% | ~8.7ms (114 FPS) | ~210 MB | NPU accelerated, Pi 5 only |
 | Simulator | Minimal | ~1ms | Minimal | Desktop testing |
-| Hailo 8L | Minimal | TBD | Less | NPU accelerated |
 
 ## Local Testing (Desktop)
 
@@ -315,9 +329,10 @@ ros2 topic echo /yolo_detections
 
 1. **Local Testing**: Use camera simulator with test video to validate detections
 2. **Desktop Development**: Use detection simulator for UI/logic testing
-3. **Hardware Testing**: Deploy ONNX node to Pi CM4
-4. **Performance Tuning**: Adjust `num_threads` and `detection_frequency`
-5. **Production**: Use ONNX node with optimized parameters
+3. **Hardware Testing (Pi CM4)**: Deploy ONNX node
+4. **Hardware Testing (Pi 5 + Hailo)**: Deploy Hailo node for accelerated inference
+5. **Performance Tuning**: Adjust `num_threads` (ONNX) or `detection_frequency` (all engines)
+6. **Production**: Use Hailo node on Pi 5 or ONNX node on Pi CM4
 
 ## Troubleshooting
 
