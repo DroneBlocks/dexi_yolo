@@ -10,8 +10,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'hef_path',
-            default_value='/usr/share/hailo-models/yolov8s_h8l.hef',
-            description='Path to Hailo HEF model file'
+            default_value='',
+            description='Path to Hailo HEF model file (empty = package default best_optimized.hef)'
         ),
         DeclareLaunchArgument(
             'confidence_threshold',
@@ -23,6 +23,11 @@ def generate_launch_description():
             default_value='10.0',
             description='Max detection frequency in Hz'
         ),
+        DeclareLaunchArgument(
+            'class_names',
+            default_value='car,motorcycle,truck,bird,cat,dog',
+            description='Comma-separated class names matching model output order'
+        ),
 
         Node(
             package='dexi_yolo',
@@ -33,6 +38,7 @@ def generate_launch_description():
                 'hef_path': LaunchConfiguration('hef_path'),
                 'confidence_threshold': LaunchConfiguration('confidence_threshold'),
                 'detection_frequency': LaunchConfiguration('detection_frequency'),
+                'class_names': LaunchConfiguration('class_names'),
             }],
         )
     ])
