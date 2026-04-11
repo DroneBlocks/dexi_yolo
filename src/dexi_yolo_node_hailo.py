@@ -156,38 +156,41 @@ class DexiYoloHailoNode(Node):
             self.get_logger().error(f"Error: {e}")
 
     def _parse_detections(self, raw_output, original_shape):
-        """Parse Hailo NMS output — shape (num_classes, 5, max_detections)
-        where the 5 values are [y_min, x_min, y_max, x_max, score]"""
+        """Parse Hailo NMS output — list of per-class arrays from yolov8_nms_postprocess.
+        Each per-class array has shape (5, N_i) where 5 = [y_min, x_min, y_max, x_max, score]
+        and N_i is the number of detections for that class."""
         detections = []
 
-        arr = np.array(raw_output)
-
-        # Log shape once on first frame
+        # Log output structure on first frame for debugging
         if self.frame_count == 1:
-            self.get_logger().info(f"NMS output shape: {arr.shape}")
+            self.get_logger().info(f"NMS output: {len(raw_output)} classes")
+            for i, class_dets in enumerate(raw_output):
+                arr = np.array(class_dets)
+                name = self.class_names[i] if i < len(self.class_names) else f"class_{i}"
+                self.get_logger().info(f"  [{i}] {name}: shape={arr.shape}, dtype={arr.dtype}")
+                if arr.size > 0:
+                    self.get_logger().info(f"       sample: {arr.flat[:5]}")
 
-        # Handle (num_classes, 5, max_detections) from yolov8_nms_postprocess
-        if arr.ndim == 3 and arr.shape[1] == 5:
-            for cls_idx in range(arr.shape[0]):
-                # arr[cls_idx] is (5, max_detections)
-                scores = arr[cls_idx, 4, :]  # confidence scores
-                for det_idx in range(arr.shape[2]):
-                    conf = float(scores[det_idx])
+        for cls_idx, class_dets in enumerate(raw_output):
+            arr = np.array(class_dets)
+            if arr.size == 0:
+                continue
+
+            # Determine layout: (5, N) or (N, 5)
+            if arr.ndim == 2 and arr.shape[0] == 5:
+                # (5, N) — rows are [y_min, x_min, y_max, x_max, score], columns are detections
+                num_dets = arr.shape[1]
+                for det_idx in range(num_dets):
+                    conf = float(arr[4, det_idx])
                     if conf < self.confidence_threshold:
                         continue
+                    y_min = float(arr[0, det_idx])
+                    x_min = float(arr[1, det_idx])
+                    y_max = float(arr[2, det_idx])
+                    x_max = float(arr[3, det_idx])
 
-                    y_min = float(arr[cls_idx, 0, det_idx])
-                    x_min = float(arr[cls_idx, 1, det_idx])
-                    y_max = float(arr[cls_idx, 2, det_idx])
-                    x_max = float(arr[cls_idx, 3, det_idx])
-
-                    bbox = [
-                        max(0.0, x_min),
-                        max(0.0, y_min),
-                        min(1.0, x_max),
-                        min(1.0, y_max),
-                    ]
-
+                    bbox = [max(0.0, x_min), max(0.0, y_min),
+                            min(1.0, x_max), min(1.0, y_max)]
                     class_name = self.class_names[cls_idx] if cls_idx < len(self.class_names) else f"class_{cls_idx}"
                     det_msg = YoloDetectionMsg()
                     det_msg.class_name = class_name
@@ -195,37 +198,25 @@ class DexiYoloHailoNode(Node):
                     det_msg.bbox = bbox
                     detections.append(det_msg)
 
-            return detections
+            elif arr.ndim == 2 and arr.shape[1] == 5:
+                # (N, 5) — rows are detections, columns are [y_min, x_min, y_max, x_max, score]
+                for det_idx in range(arr.shape[0]):
+                    conf = float(arr[det_idx, 4])
+                    if conf < self.confidence_threshold:
+                        continue
+                    y_min = float(arr[det_idx, 0])
+                    x_min = float(arr[det_idx, 1])
+                    y_max = float(arr[det_idx, 2])
+                    x_max = float(arr[det_idx, 3])
 
-        # Fallback: list of per-class arrays, each (N_i, 5)
-        for cls_idx, class_dets in enumerate(raw_output):
-            class_arr = np.array(class_dets)
-            if class_arr.ndim < 2 or class_arr.shape[0] == 0:
-                continue
-
-            for det_idx in range(class_arr.shape[0]):
-                conf = float(class_arr[det_idx, 4])
-                if conf < self.confidence_threshold:
-                    continue
-
-                y_min = float(class_arr[det_idx, 0])
-                x_min = float(class_arr[det_idx, 1])
-                y_max = float(class_arr[det_idx, 2])
-                x_max = float(class_arr[det_idx, 3])
-
-                bbox = [
-                    max(0.0, x_min),
-                    max(0.0, y_min),
-                    min(1.0, x_max),
-                    min(1.0, y_max),
-                ]
-
-                class_name = self.class_names[cls_idx] if cls_idx < len(self.class_names) else f"class_{cls_idx}"
-                det_msg = YoloDetectionMsg()
-                det_msg.class_name = class_name
-                det_msg.confidence = conf
-                det_msg.bbox = bbox
-                detections.append(det_msg)
+                    bbox = [max(0.0, x_min), max(0.0, y_min),
+                            min(1.0, x_max), min(1.0, y_max)]
+                    class_name = self.class_names[cls_idx] if cls_idx < len(self.class_names) else f"class_{cls_idx}"
+                    det_msg = YoloDetectionMsg()
+                    det_msg.class_name = class_name
+                    det_msg.confidence = conf
+                    det_msg.bbox = bbox
+                    detections.append(det_msg)
 
         return detections
 
