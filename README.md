@@ -222,7 +222,7 @@ sudo apt install graphviz libgraphviz-dev python3-tk
 python3.10 -m venv venv
 source venv/bin/activate
 pip install hailo_dataflow_compiler-<version>.whl
-pip install opencv-python numpy
+pip install opencv-python-headless
 ```
 
 ### Compile
@@ -234,7 +234,7 @@ cd hailo
 ```
 
 The script will:
-1. Extract 64 calibration frames from `scripts/dexi_camera_all_classes.mp4`
+1. Download 128 class-balanced calibration images from COCO val2017
 2. Parse the ONNX model into a Hailo Archive (HAR)
 3. Quantize to INT8 using the calibration data
 4. Compile to HEF for the Hailo 8L
