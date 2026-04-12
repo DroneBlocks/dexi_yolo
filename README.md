@@ -269,8 +269,35 @@ ros2 launch dexi_yolo yolo_hailo_launch.py
 |--------|-----------|----------------|---------|--------|
 | PyTorch | Higher | ~250ms | More | Full framework |
 | ONNX | Lower | ~230ms | Less | Optimized runtime |
-| Hailo 8L | ~12% | ~8.7ms (114 FPS) | ~210 MB | NPU accelerated, Pi 5 only |
+| Hailo 8L | ~9% | ~8.7ms (114 FPS) | ~214 MB | NPU accelerated, Pi 5 only |
 | Simulator | Minimal | ~1ms | Minimal | Desktop testing |
+
+### Pi 5: ONNX (CPU) vs Hailo 8L (Measured)
+
+Apples-to-apples 60s inference test on identical scene, same detection rate (2 Hz),
+same companion nodes running (camera, apriltag, bringup). Each engine was allowed
+to settle for 60 seconds before measurement.
+
+| Metric                | ONNX (CPU, FP32) | Hailo 8L (INT8, NPU) | Delta          |
+|-----------------------|------------------|----------------------|----------------|
+| Detection count       | 113              | 113                  | tie            |
+| Class correctness     | 113/113 `dog`    | 113/113 `dog`        | tie            |
+| False positives       | 0                | 0                    | tie            |
+| Avg confidence        | 0.744            | 0.877                | **+0.133**     |
+| Confidence range      | varies           | 0.856 – 0.885        | Hailo tighter  |
+| Inference process CPU | ~31.2% sustained | ~7.2% sustained      | **~4.3× less** |
+| Memory (RSS)          | ~247 MB          | ~214 MB              | ~33 MB less    |
+| System load avg       | 1.64 – 1.91      | 1.44 – 1.69          | Hailo lower    |
+| Temperature           | 67.5 – 69.2 °C   | 64.8 – 65.9 °C       | ~3 °C cooler   |
+| Inference time        | ~175 ms / frame  | ~8.9 ms / frame      | **~20× faster**|
+| Max throughput        | ~5.7 FPS         | ~110 FPS             | **~20× higher**|
+
+**Takeaway:** The Hailo 8L matches ONNX on detection accuracy (identical count, zero
+false positives) while using ~4× less CPU, running ~20× faster, and actually producing
+*higher* average confidence (0.88 vs 0.74). On Pi 5 with the Hailo M.2 hat, the Hailo
+engine is the clear choice — it frees up ~24% of CPU for other nodes (apriltag,
+offboard control, etc.) while delivering better-quality detections at a much higher
+throughput ceiling.
 
 ## Local Testing (Desktop)
 
