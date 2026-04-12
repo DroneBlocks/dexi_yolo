@@ -13,17 +13,19 @@ A ROS2 package for YOLO object detection optimized for Raspberry Pi. Provides Py
 ## Quick Start
 
 ```bash
-# Real hardware (Pi CM4) - using launch files
-ros2 launch dexi_yolo yolo_onnx_launch.py  # ONNX (recommended)
-ros2 launch dexi_yolo yolo_launch.py       # PyTorch
-
-
-# Hailo 8L hardware (Pi 5 with Hailo M.2)
+# Pi 5 with Hailo M.2 hat (recommended when available)
 ros2 launch dexi_yolo yolo_hailo_launch.py
 
+# Pi CM4 / Pi without Hailo — ONNX CPU inference
+ros2 launch dexi_yolo yolo_onnx_launch.py
+
+# PyTorch (heavier, mostly for reference)
+ros2 launch dexi_yolo yolo_launch.py
+
 # Or run nodes directly
-ros2 run dexi_yolo dexi_yolo_node_onnx.py  # ONNX
-ros2 run dexi_yolo dexi_yolo_node.py       # PyTorch
+ros2 run dexi_yolo dexi_yolo_node_hailo.py  # Hailo 8L
+ros2 run dexi_yolo dexi_yolo_node_onnx.py   # ONNX
+ros2 run dexi_yolo dexi_yolo_node.py        # PyTorch
 
 # Desktop simulation
 ros2 run dexi_yolo dexi_yolo_simulator
@@ -43,10 +45,11 @@ dexi_yolo/
 │   ├── compile_model.sh            # ONNX → HEF compilation script
 │   └── extract_calib_frames.py     # Calibration frame extractor
 ├── models/
-│   ├── yolov8n.pt                  # PyTorch model (6MB)
-│   ├── yolov8n.onnx                # ONNX model (12MB)
-│   ├── best_optimized.onnx         # Custom trained ONNX model
-│   └── best_optimized.hef          # Hailo 8L compiled model
+│   ├── yolov8n.pt                  # Stock YOLOv8n PyTorch (reference)
+│   ├── yolov8n.onnx                # Stock YOLOv8n ONNX (reference)
+│   ├── best_optimized.pt           # Custom fine-tuned PyTorch model
+│   ├── best_optimized.onnx         # Custom fine-tuned ONNX model (320x320)
+│   └── best_optimized.hef          # Custom fine-tuned Hailo 8L compiled model
 ├── launch/
 │   ├── yolo_launch.py              # PyTorch node launch file
 │   ├── yolo_onnx_launch.py         # ONNX node launch file
@@ -129,7 +132,7 @@ ros2 topic echo /yolo_detections
 | `detection_frequency` | `1.0` | Detection rate (Hz) |
 | `num_threads` | `2` | CPU threads (reduce for Pi, increase for desktop) |
 | `nms_threshold` | `0.4` | Non-Maximum Suppression threshold |
-| `use_letterbox` | `false` | Use letterbox preprocessing (preserves aspect ratio) |
+| `use_letterbox` | `true` | Use letterbox preprocessing (preserves aspect ratio) |
 
 ### Hailo Node Parameters
 
@@ -243,11 +246,12 @@ Output: `models/best_optimized.hef`
 
 ### Deploy to Pi
 
-The HEF model is included in the repo on this branch. On the Pi, check out the branch and rebuild:
+The compiled `best_optimized.hef` is checked into `models/`, so deploying is just
+pulling the repo and rebuilding the workspace:
 
 ```bash
 cd ~/dexi_ws/src/dexi_yolo
-git fetch origin && git checkout feature/hailo-8l-compilation
+git pull
 cd ~/dexi_ws && colcon build --packages-select dexi_yolo
 source install/setup.bash
 
@@ -268,8 +272,9 @@ ros2 launch dexi_yolo yolo_hailo_launch.py
 | Engine | CPU Usage | Inference Time | Memory | Notes |
 |--------|-----------|----------------|---------|--------|
 | PyTorch | Higher | ~250ms | More | Full framework |
-| ONNX | Lower | ~230ms | Less | Optimized runtime |
-| Hailo 8L | ~9% | ~8.7ms (114 FPS) | ~214 MB | NPU accelerated, Pi 5 only |
+| ONNX (Pi CM4) | 60–80% | ~230ms | ~247 MB | CPU-only, fine on CM4 |
+| ONNX (Pi 5) | ~31% | ~175ms | ~247 MB | CPU-only, measured at 2 Hz |
+| Hailo 8L (Pi 5) | ~7% | ~8.9ms (~110 FPS) | ~214 MB | NPU accelerated, Pi 5 + M.2 hat only |
 | Simulator | Minimal | ~1ms | Minimal | Desktop testing |
 
 ### Pi 5: ONNX (CPU) vs Hailo 8L (Measured)
@@ -326,7 +331,7 @@ ros2 run dexi_yolo camera_simulator_node.py --ros-args \
     -p loop:=true
 
 # Terminal 2: Start ONNX detection node
-ros2 run dexi_yolo dexi_yolo_node_onnx --ros-args \
+ros2 run dexi_yolo dexi_yolo_node_onnx.py --ros-args \
     -p input_size:=320 \
     -p use_letterbox:=false \
     -p num_threads:=4
@@ -366,10 +371,10 @@ ros2 topic echo /yolo_detections
 ### High CPU Usage
 ```bash
 # Reduce CPU threads
-ros2 run dexi_yolo dexi_yolo_node_onnx --ros-args -p num_threads:=1
+ros2 run dexi_yolo dexi_yolo_node_onnx.py --ros-args -p num_threads:=1
 
 # Lower detection frequency  
-ros2 run dexi_yolo dexi_yolo_node_onnx --ros-args -p detection_frequency:=0.5
+ros2 run dexi_yolo dexi_yolo_node_onnx.py --ros-args -p detection_frequency:=0.5
 ```
 
 ### Multiple Detections
