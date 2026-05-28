@@ -244,6 +244,12 @@ The script will:
 
 Output: `models/best_optimized.hef`
 
+> **Targeting a full Hailo 8 (26 TOPS):** `compile_model.sh` hardcodes
+> `HW_ARCH="hailo8l"`. The resulting HEF runs on a Hailo 8 but won't use its extra
+> capacity (HailoRT warns "lower performance"). To compile natively for the Hailo 8,
+> set `HW_ARCH="hailo8"` in the script (all three `--hw-arch` steps pick it up). See
+> the Hailo 8 vs 8L benchmark under [Performance](#performance).
+
 ### Deploy to Pi
 
 The compiled `best_optimized.hef` is checked into `models/`, so deploying is just
@@ -275,6 +281,7 @@ ros2 launch dexi_yolo yolo_hailo_launch.py
 | ONNX (Pi CM4) | 60–80% | ~230ms | ~247 MB | CPU-only, fine on CM4 |
 | ONNX (Pi 5) | ~31% | ~175ms | ~247 MB | CPU-only, measured at 2 Hz |
 | Hailo 8L (Pi 5) | ~7% | ~8.9ms (~110 FPS) | ~214 MB | NPU accelerated, Pi 5 + M.2 hat only |
+| Hailo 8 (Pi 5) | ~7% | ~9.0ms (~99 FPS) | ~214 MB | 26-TOPS M.2 module; running the 8L-compiled HEF gives **no speedup** — recompile with `--hw-arch hailo8` to use the bigger chip (see note below) |
 | Simulator | Minimal | ~1ms | Minimal | Desktop testing |
 
 ### Pi 5: ONNX (CPU) vs Hailo 8L (Measured)
@@ -303,6 +310,43 @@ false positives) while using ~4× less CPU, running ~20× faster, and actually p
 engine is the clear choice — it frees up ~24% of CPU for other nodes (apriltag,
 offboard control, etc.) while delivering better-quality detections at a much higher
 throughput ceiling.
+
+### Hailo 8 (26 TOPS) vs Hailo 8L (13 TOPS)
+
+The Hailo M.2 module ships in two variants: the **Hailo 8L** (13 TOPS, on the
+Raspberry Pi AI Kit) and the full **Hailo 8** (26 TOPS, e.g. the AI HAT+ 26T or an
+M.2 8 module). Both enumerate on a Pi 5 with no `config.txt`/PCIe overlay changes —
+the in-kernel `hailo_pci` driver auto-probes once `hailo-all` is installed and the
+firmware blob is present (a reboot is required after install so the driver re-probes).
+
+A HEF compiled for `hailo8l` **runs as-is on a Hailo 8** (forward-compatible), but
+HailoRT prints `HEF was compiled for Hailo8L device, while the device itself is
+Hailo8. This will result in lower performance.` — and the warning is literally true:
+the HEF only allocates 8L-sized resources, so the bigger chip sits underutilized.
+
+Measured on a Pi 5 + **Hailo 8** M.2 (`HAILO-8 AI ACC M.2 M KEY MODULE EXT TEMP`,
+arch `HAILO8`, FW 4.20.0), using the bundled (8L-compiled) `best_optimized.hef` —
+`hailortcli run`, batch size 1, 6s runs:
+
+| Metric                | Hailo 8L (8L HEF)¹ | Hailo 8 (same 8L HEF) | Hailo 8 (native COCO `yolov8s_h8.hef`)² |
+|-----------------------|--------------------|-----------------------|------------------------------------------|
+| HW latency / frame    | ~8.9 ms            | **9.04 ms** (overall 10.23 ms) | 8.16 ms                        |
+| Max throughput        | ~110 FPS           | **98.6 FPS**          | 151 FPS                                  |
+| Power (avg)           | —                  | **0.97 W**            | —                                        |
+| Chip temperature      | —                  | **~56 °C**            | —                                        |
+
+¹ 8L column is the ROS-node measurement from the table above (same model). The 8L and
+Hailo-8 numbers for the 8L HEF are within noise of each other — confirming the bigger
+chip gives no benefit until the model is recompiled for it.
+² Different (heavier, 80-class COCO) network compiled natively for `hailo8`, shown only
+as a reference that the Hailo 8 *does* run native-arch HEFs.
+
+**Takeaway:** Don't expect a free speedup from dropping a Hailo 8 in place of an 8L —
+the existing 8L HEF runs ~identically (marginally slower). To actually use the 26-TOPS
+part, recompile the model for `hailo8` (see below). For this 320×320 6-class model it
+doesn't matter much in practice: both variants already exceed the 2 Hz detection
+pipeline by ~50×, draw ~1 W, and stay cool (~56 °C) — the 8L is plenty. The Hailo 8
+headroom only becomes useful with larger models or higher frame rates.
 
 ## Local Testing (Desktop)
 
