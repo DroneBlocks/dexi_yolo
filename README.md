@@ -47,9 +47,10 @@ dexi_yolo/
 ├── models/
 │   ├── yolov8n.pt                  # Stock YOLOv8n PyTorch (reference)
 │   ├── yolov8n.onnx                # Stock YOLOv8n ONNX (reference)
-│   ├── best_optimized.pt           # Custom fine-tuned PyTorch model
-│   ├── best_optimized.onnx         # Custom fine-tuned ONNX model (320x320)
-│   └── best_optimized.hef          # Custom fine-tuned Hailo 8L compiled model
+│   ├── models.yaml              # Model profiles, see below
+│   ├── avr2026n320.onnx         # AVR 2026, 10 classes, default
+│   ├── avr2025n320.{pt,onnx,hef} # AVR 2025, 6 classes
+│   └── yolov8n.{pt,onnx}        # Stock COCO, 80 classes
 ├── launch/
 │   ├── yolo_launch.py              # PyTorch node launch file
 │   ├── yolo_onnx_launch.py         # ONNX node launch file
@@ -126,7 +127,8 @@ ros2 topic echo /yolo_detections
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `model_path` | `models/best_optimized.onnx` | Path to ONNX model file |
+| `model` | `avr_2026` | Profile from `models/models.yaml`, or a path to an .onnx |
+| `classes` | from the profile | Comma-separated, training order. Required when `model` is a path |
 | `input_size` | `320` | Model input size (320x320 for custom model) |
 | `confidence_threshold` | `0.5` | Detection confidence threshold |
 | `detection_frequency` | `1.0` | Detection rate (Hz) |
@@ -138,7 +140,7 @@ ros2 topic echo /yolo_detections
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `hef_path` | `models/best_optimized.hef` | Path to Hailo HEF model (defaults to package model) |
+| `hef_path` | `models/avr2025n320.hef` | Path to Hailo HEF model (defaults to package model) |
 | `confidence_threshold` | `0.5` | Detection confidence threshold |
 | `detection_frequency` | `10.0` | Max detection rate (Hz) |
 | `class_names` | `car,motorcycle,truck,bird,cat,dog` | Comma-separated class names matching model output order |
@@ -242,11 +244,11 @@ The script will:
 3. Quantize to INT8 using the calibration data
 4. Compile to HEF for the Hailo 8L
 
-Output: `models/best_optimized.hef`
+Output: `models/avr2025n320.hef`
 
 ### Deploy to Pi
 
-The compiled `best_optimized.hef` is checked into `models/`, so deploying is just
+The compiled `avr2025n320.hef` is checked into `models/`, so deploying is just
 pulling the repo and rebuilding the workspace:
 
 ```bash
@@ -255,10 +257,34 @@ git pull
 cd ~/dexi_ws && colcon build --packages-select dexi_yolo
 source install/setup.bash
 
-# Launch (uses best_optimized.hef by default)
+# Launch (uses avr2025n320.hef by default)
 ros2 launch dexi_yolo yolo_hailo_launch.py
 ```
 
+
+## Model profiles
+
+`models/models.yaml` maps a name to a weights file and the class list that goes
+with it, so the two cannot drift apart.
+
+| profile | classes | notes |
+|---|---|---|
+| `avr_2026` | 10 | AVR 2026 field artwork. Default. |
+| `avr_2025` | 6 | AVR 2025. The only profile with a Hailo build. |
+| `coco` | 80 | Stock COCO, for anything not AVR. |
+
+```bash
+ros2 launch dexi_yolo yolo_onnx_launch.py model:=coco
+```
+
+A path works too, but then `classes` is required and must be in training order:
+
+```bash
+ros2 launch dexi_yolo yolo_onnx_launch.py model:=/home/dexi/mine.onnx classes:=apple,banana
+```
+
+Class lists in `models.yaml` were read out of each `.onnx`, which carries them
+in its metadata.
 
 ## Performance
 

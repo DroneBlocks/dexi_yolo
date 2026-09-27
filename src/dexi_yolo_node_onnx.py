@@ -40,7 +40,7 @@ class DexiYoloOnnxNode(Node):
         super().__init__('dexi_yolo_onnx_node')
         
         # Parameters
-        self.declare_parameter('model_path', 'models/best_optimized.onnx')
+        self.declare_parameter('model_path', 'models/avr2025n320.onnx')
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('detection_frequency', 1.0)  # Hz
         self.declare_parameter('input_size', 320)  # Model input size (320x320 training)

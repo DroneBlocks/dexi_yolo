@@ -28,7 +28,7 @@ class DexiYoloHailoNode(Node):
 
         # Parameters
         pkg_share = get_package_share_directory('dexi_yolo')
-        default_hef = os.path.join(pkg_share, 'models', 'best_optimized.hef')
+        default_hef = os.path.join(pkg_share, 'models', 'avr2025n320.hef')
         self.declare_parameter('hef_path', default_hef)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('detection_frequency', 10.0)  # Hz
