@@ -40,7 +40,7 @@ def generate_launch_description():
 
     model_path_arg = DeclareLaunchArgument(
         'model_path',
-        default_value='models/best_optimized.onnx',
+        default_value='models/avr2025n320.onnx',
         description='Path to ONNX model file'
     )
 

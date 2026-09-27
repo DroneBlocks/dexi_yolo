@@ -11,7 +11,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'hef_path',
             default_value='',
-            description='Path to Hailo HEF model file (empty = package default best_optimized.hef)'
+            description='Path to Hailo HEF model file (empty = package default avr2025n320.hef)'
         ),
         DeclareLaunchArgument(
             'confidence_threshold',

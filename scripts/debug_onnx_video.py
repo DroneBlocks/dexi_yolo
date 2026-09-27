@@ -386,7 +386,7 @@ def main():
     print("\n💡 Tips:")
     print("  - If no detections: try lowering conf_threshold or changing input_size")
     print("  - If detections are wrong: try use_letterbox=True")
-    print("  - Compare with: yolo predict source=test_video.mp4 model=models/best_optimized.onnx")
+    print("  - Compare with: yolo predict source=test_video.mp4 model=models/avr2025n320.onnx")
 
 if __name__ == "__main__":
     main()

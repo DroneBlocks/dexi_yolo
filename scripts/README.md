@@ -40,7 +40,7 @@ python debug_onnx_inference.py
 
 Edit these variables in the script:
 ```python
-model_path = "models/best_optimized.onnx"  # Your model path
+model_path = "models/avr2025n320.onnx"  # Your model path
 test_image = "test_image.jpg"               # Your test image
 class_names = ['car', 'motorcycle', 'truck', 'bird', 'cat', 'dog']  # Your classes
 ```
@@ -74,7 +74,7 @@ python debug_onnx_video.py
 Edit these variables in the script:
 ```python
 video_path = "../test_video.mp4"            # Your MP4 file
-model_path = "../models/best_optimized.onnx"
+model_path = "../models/avr2025n320.onnx"
 class_names = ['car', 'motorcycle', 'truck', 'bird', 'cat', 'dog']
 input_size = 320                            # Model trained at 320x320
 conf_threshold = 0.5                        # Lower if needed (0.25)
@@ -90,7 +90,7 @@ Creates an annotated video file: `test_video_output_resize.mp4` (or `_letterbox.
 - Start with `max_frames = 100` to quickly test settings
 - If no detections: lower `conf_threshold` to 0.25 or try different `input_size`
 - If boxes are misaligned: try `use_letterbox = True`
-- Compare results with: `yolo predict source=test_video.mp4 model=models/best_optimized.onnx`
+- Compare results with: `yolo predict source=test_video.mp4 model=models/avr2025n320.onnx`
 
 ## Troubleshooting
 

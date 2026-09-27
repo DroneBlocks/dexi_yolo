@@ -1,0 +1,27 @@
+# Model profiles. `model:` in dexi_config.yaml names one of these keys,
+# or gives a path, in which case `classes` must be set alongside it.
+#
+# classes are read out of each .onnx and are in training order. The model
+# emits indices; this list is the only thing that names them.
+
+avr_2026:
+  # AVR 2026 field artwork. yolo11n, trained 2026-09-22 from DroneBlocks/avr-yolo avr2026n320_v6.
+  file: avr2026n320.onnx
+  input_size: 320
+  confidence: 0.45
+  classes: [wheat_barrel, water_barrel, gasoline, toxic_fluid, wheat_barn, water_barn, bridge_1line, bridge_2line, bridge_3line, blackout]
+
+avr_2025:
+  # AVR 2025 field objects. yolov8n fine-tuned from DroneBlocks/dexi_yolo_training.
+  file: avr2025n320.onnx
+  hef: avr2025n320.hef
+  input_size: 320
+  confidence: 0.5
+  classes: [car, motorcycle, truck, bird, cat, dog]
+
+coco:
+  # Stock COCO. Use this for anything that is not AVR.
+  file: yolov8n.onnx
+  input_size: 320
+  confidence: 0.5
+  classes: [person, bicycle, car, motorcycle, airplane, bus, train, truck, boat, traffic light, fire hydrant, stop sign, parking meter, bench, bird, cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe, backpack, umbrella, handbag, tie, suitcase, frisbee, skis, snowboard, sports ball, kite, baseball bat, baseball glove, skateboard, surfboard, tennis racket, bottle, wine glass, cup, fork, knife, spoon, bowl, banana, apple, sandwich, orange, broccoli, carrot, hot dog, pizza, donut, cake, chair, couch, potted plant, bed, dining table, toilet, tv, laptop, mouse, remote, keyboard, cell phone, microwave, oven, toaster, sink, refrigerator, book, clock, vase, scissors, teddy bear, hair drier, toothbrush]
