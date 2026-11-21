@@ -78,16 +78,22 @@ class DexiYoloOnnxNode(Node):
         self.backend = self.get_parameter('backend').value
         self.ncnn_net = None
         if self.backend == 'ncnn':
-            import ncnn
+            # Fall back to onnxruntime rather than lose detection if NCNN is not usable
+            # (pip package missing from the image, or no NCNN export for this model).
             prefix = self.get_parameter('ncnn_model').value or os.path.join(
                 os.path.splitext(self.model_path)[0] + '_ncnn_model', 'model.ncnn')
-            self.ncnn_mat = ncnn.Mat
-            self.ncnn_net = ncnn.Net()
-            self.ncnn_net.opt.num_threads = self.num_threads
-            self.ncnn_net.opt.use_vulkan_compute = False
-            if self.ncnn_net.load_param(prefix + '.param') != 0 or self.ncnn_net.load_model(prefix + '.bin') != 0:
-                raise RuntimeError(f"Failed to load NCNN model {prefix}.param/.bin")
-            self.get_logger().info(f"NCNN backend: {prefix} ({self.num_threads} threads)")
+            try:
+                import ncnn
+                net = ncnn.Net()
+                net.opt.num_threads = self.num_threads
+                net.opt.use_vulkan_compute = False
+                if net.load_param(prefix + '.param') != 0 or net.load_model(prefix + '.bin') != 0:
+                    raise RuntimeError(f"cannot load {prefix}.param/.bin")
+                self.ncnn_mat = ncnn.Mat
+                self.ncnn_net = net
+                self.get_logger().info(f"NCNN backend: {prefix} ({self.num_threads} threads)")
+            except Exception as e:  # ImportError, missing model files
+                self.get_logger().error(f"NCNN backend unavailable ({e}); using onnxruntime")
 
         # Initialize ONNX Runtime session with CPU optimization
         if self.ncnn_net is None:
