@@ -1,0 +1,27 @@
+description: Ultralytics YOLO11n model trained on C:\Users\Abegh\AVR2026\dataset\avr2026.yaml
+author: Ultralytics
+date: '2026-11-21T15:21:51.831537'
+version: 8.3.185
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 320
+- 320
+names:
+  0: wheat_barrel
+  1: water_barrel
+  2: gasoline
+  3: toxic_fluid
+  4: wheat_barn
+  5: water_barn
+  6: bridge_1line
+  7: bridge_2line
+  8: bridge_3line
+  9: blackout
+args:
+  batch: 1
+  half: false
+channels: 3
