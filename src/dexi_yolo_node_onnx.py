@@ -129,8 +129,8 @@ class DexiYoloOnnxNode(Node):
             10
         )
         
-        # Timer for detection frequency control
-        self.last_detection_time = 0.0
+        # Detection frequency control: time the next frame is due (see image_callback)
+        self.next_detection_time = 0.0
         self.min_detection_interval = 1.0 / self.detection_frequency
         
         # Statistics
@@ -337,8 +337,8 @@ class DexiYoloOnnxNode(Node):
         """Callback for incoming compressed images"""
         current_time = time.time()
         
-        # Check if enough time has passed since last detection
-        if current_time - self.last_detection_time < self.min_detection_interval:
+        # Skip frames until the next detection is due
+        if current_time < self.next_detection_time:
             return
         
         self.frame_count += 1
@@ -373,7 +373,13 @@ class DexiYoloOnnxNode(Node):
                         f"(inf: {avg_inference:.1f}ms, pre: {avg_preprocess:.1f}ms, post: {avg_postprocess:.1f}ms)"
                     )
             
-            self.last_detection_time = current_time
+            # Stay on a fixed schedule rather than "interval since the last frame used". On a
+            # throttled input (a frame every 1/6 s, say) the old rule waited for the first frame
+            # after the interval and ran ~7% below detection_frequency. After a stall, restart.
+            if current_time - self.next_detection_time < self.min_detection_interval:
+                self.next_detection_time += self.min_detection_interval
+            else:
+                self.next_detection_time = current_time + self.min_detection_interval
             
         except Exception as e:
             self.get_logger().error(f"Error processing image: {e}")
