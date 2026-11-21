@@ -50,7 +50,13 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('verbose_logging', False)  # Enable verbose detection logging
         self.declare_parameter('max_detections', 10)  # Maximum detections to keep (limits processing)
         self.declare_parameter('class_names', 'car,motorcycle,truck,bird,cat,dog')  # Comma-separated class names
-        
+        # 'onnx' (onnxruntime) or 'ncnn'. NCNN runs fp16 on ARM: on a CM5 it was ~2.5x faster
+        # than onnxruntime for the same model with the same detections on real frames.
+        self.declare_parameter('backend', 'onnx')
+        # NCNN model prefix (<prefix>.param / <prefix>.bin). Empty: <model>_ncnn_model/model.ncnn
+        # next to the ONNX file, as ultralytics exports it.
+        self.declare_parameter('ncnn_model', '')
+
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
         self.confidence_threshold = self.get_parameter('confidence_threshold').value
@@ -69,8 +75,23 @@ class DexiYoloOnnxNode(Node):
         self.input_tensor = np.zeros((1, 3, self.input_size, self.input_size), dtype=np.float32)
         self.resized_buffer = np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8)
         
+        self.backend = self.get_parameter('backend').value
+        self.ncnn_net = None
+        if self.backend == 'ncnn':
+            import ncnn
+            prefix = self.get_parameter('ncnn_model').value or os.path.join(
+                os.path.splitext(self.model_path)[0] + '_ncnn_model', 'model.ncnn')
+            self.ncnn_mat = ncnn.Mat
+            self.ncnn_net = ncnn.Net()
+            self.ncnn_net.opt.num_threads = self.num_threads
+            self.ncnn_net.opt.use_vulkan_compute = False
+            if self.ncnn_net.load_param(prefix + '.param') != 0 or self.ncnn_net.load_model(prefix + '.bin') != 0:
+                raise RuntimeError(f"Failed to load NCNN model {prefix}.param/.bin")
+            self.get_logger().info(f"NCNN backend: {prefix} ({self.num_threads} threads)")
+
         # Initialize ONNX Runtime session with CPU optimization
-        self.get_logger().info(f"Loading ONNX model from {self.model_path}...")
+        if self.ncnn_net is None:
+            self.get_logger().info(f"Loading ONNX model from {self.model_path}...")
         try:
             # Optimized session options for Pi CM4
             sess_options = ort.SessionOptions()
@@ -91,15 +112,20 @@ class DexiYoloOnnxNode(Node):
                 'enable_cpu_mem_arena': False
             })]
             
-            self.session = ort.InferenceSession(
-                self.model_path, 
-                sess_options=sess_options,
-                providers=providers
-            )
-            
-            # Get model input/output info
-            self.input_name = self.session.get_inputs()[0].name
-            self.output_name = self.session.get_outputs()[0].name
+            if self.ncnn_net is None:
+                self.session = ort.InferenceSession(
+                    self.model_path,
+                    sess_options=sess_options,
+                    providers=providers
+                )
+
+                # Get model input/output info
+                self.input_name = self.session.get_inputs()[0].name
+                self.output_name = self.session.get_outputs()[0].name
+            else:
+                # NCNN backend: no onnxruntime session (saves its memory on a 2 GB board)
+                self.session = None
+                self.input_name, self.output_name = 'in0', 'out0'
             
             # Class names from parameter (comma-separated)
             class_names_str = self.get_parameter('class_names').value
@@ -389,7 +415,13 @@ class DexiYoloOnnxNode(Node):
             
             # Run inference
             start_time = time.time()
-            outputs = self.session.run([self.output_name], {self.input_name: input_tensor})
+            if self.ncnn_net is not None:
+                ex = self.ncnn_net.create_extractor()
+                ex.input('in0', self.ncnn_mat(input_tensor[0]))
+                _, out = ex.extract('out0')
+                outputs = [np.array(out)[None]]  # (1, 4 + classes, anchors), as onnxruntime returns
+            else:
+                outputs = self.session.run([self.output_name], {self.input_name: input_tensor})
             inference_time = time.time() - start_time
             self.total_inference_time += inference_time
             

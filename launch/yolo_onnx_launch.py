@@ -16,6 +16,9 @@ Usage:
 
     # Pi CM4
     ros2 launch dexi_yolo yolo_onnx_launch.py num_threads:=1 detection_frequency:=1.0
+
+    # NCNN instead of onnxruntime (fp16 on ARM, ~2.5x faster on a CM5)
+    ros2 launch dexi_yolo yolo_onnx_launch.py backend:=ncnn
 """
 
 import os
@@ -74,6 +77,7 @@ def resolve(context, *args, **kwargs):
                 'num_threads': int(cfg('num_threads')),
                 'nms_threshold': float(cfg('nms_threshold')),
                 'use_letterbox': cfg('use_letterbox').lower() in ('true', '1'),
+                'backend': cfg('backend'),
             }],
         ),
     ]
@@ -120,6 +124,13 @@ def generate_launch_description():
             'use_letterbox',
             default_value='true',
             description='Use letterbox preprocessing (preserves aspect ratio)'
+        ),
+
+        DeclareLaunchArgument(
+            'backend',
+            default_value='onnx',
+            description="'onnx' (onnxruntime) or 'ncnn' (needs the pip package ncnn and "
+                        "<model>_ncnn_model/ next to the .onnx)"
         ),
 
         OpaqueFunction(function=resolve),
