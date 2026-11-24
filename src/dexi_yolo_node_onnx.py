@@ -50,6 +50,16 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('verbose_logging', False)  # Enable verbose detection logging
         self.declare_parameter('max_detections', 10)  # Maximum detections to keep (limits processing)
         self.declare_parameter('class_names', 'car,motorcycle,truck,bird,cat,dog')  # Comma-separated class names
+        # 'onnx' (onnxruntime) or 'ncnn'. NCNN runs fp16 on ARM: on a CM5 it was ~2.5x faster
+        # than onnxruntime for the same model with the same detections on real frames.
+        self.declare_parameter('backend', 'onnx')
+        # NCNN model prefix (<prefix>.param / <prefix>.bin). Empty: <model>_ncnn_model/model.ncnn
+        # next to the ONNX file, as ultralytics exports it.
+        self.declare_parameter('ncnn_model', '')
+
+        # Comma-separated classes never published (e.g. AVR 'blackout'). A box whose top
+        # class is excluded is dropped, not relabelled as its next-best class.
+        self.declare_parameter('exclude_classes', '')
         
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
@@ -69,8 +79,29 @@ class DexiYoloOnnxNode(Node):
         self.input_tensor = np.zeros((1, 3, self.input_size, self.input_size), dtype=np.float32)
         self.resized_buffer = np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8)
         
+        self.backend = self.get_parameter('backend').value
+        self.ncnn_net = None
+        if self.backend == 'ncnn':
+            # Fall back to onnxruntime rather than lose detection if NCNN is not usable
+            # (pip package missing from the image, or no NCNN export for this model).
+            prefix = self.get_parameter('ncnn_model').value or os.path.join(
+                os.path.splitext(self.model_path)[0] + '_ncnn_model', 'model.ncnn')
+            try:
+                import ncnn
+                net = ncnn.Net()
+                net.opt.num_threads = self.num_threads
+                net.opt.use_vulkan_compute = False
+                if net.load_param(prefix + '.param') != 0 or net.load_model(prefix + '.bin') != 0:
+                    raise RuntimeError(f"cannot load {prefix}.param/.bin")
+                self.ncnn_mat = ncnn.Mat
+                self.ncnn_net = net
+                self.get_logger().info(f"NCNN backend: {prefix} ({self.num_threads} threads)")
+            except Exception as e:  # ImportError, missing model files
+                self.get_logger().error(f"NCNN backend unavailable ({e}); using onnxruntime")
+
         # Initialize ONNX Runtime session with CPU optimization
-        self.get_logger().info(f"Loading ONNX model from {self.model_path}...")
+        if self.ncnn_net is None:
+            self.get_logger().info(f"Loading ONNX model from {self.model_path}...")
         try:
             # Optimized session options for Pi CM4
             sess_options = ort.SessionOptions()
@@ -91,23 +122,31 @@ class DexiYoloOnnxNode(Node):
                 'enable_cpu_mem_arena': False
             })]
             
-            self.session = ort.InferenceSession(
-                self.model_path, 
-                sess_options=sess_options,
-                providers=providers
-            )
-            
-            # Get model input/output info
-            self.input_name = self.session.get_inputs()[0].name
-            self.output_name = self.session.get_outputs()[0].name
+            if self.ncnn_net is None:
+                self.session = ort.InferenceSession(
+                    self.model_path,
+                    sess_options=sess_options,
+                    providers=providers
+                )
+
+                # Get model input/output info
+                self.input_name = self.session.get_inputs()[0].name
+                self.output_name = self.session.get_outputs()[0].name
+            else:
+                # NCNN backend: no onnxruntime session (saves its memory on a 2 GB board)
+                self.session = None
+                self.input_name, self.output_name = 'in0', 'out0'
             
             # Class names from parameter (comma-separated)
             class_names_str = self.get_parameter('class_names').value
             self.class_names = [name.strip() for name in class_names_str.split(',')]
+            self.exclude_classes = {c.strip() for c in self.get_parameter('exclude_classes').value.split(',') if c.strip()}
             
             self.get_logger().info("Optimized ONNX model loaded successfully!")
             self.get_logger().info(f"Input: {self.input_name}, Output: {self.output_name}")
             self.get_logger().info(f"Classes: {self.class_names}")
+            if self.exclude_classes:
+                self.get_logger().info(f"Excluded (never published): {sorted(self.exclude_classes)}")
             self.get_logger().info(f"CPU threads: intra={self.num_threads}, inter=1")
             
         except Exception as e:
@@ -129,8 +168,8 @@ class DexiYoloOnnxNode(Node):
             10
         )
         
-        # Timer for detection frequency control
-        self.last_detection_time = 0.0
+        # Detection frequency control: time the next frame is due (see image_callback)
+        self.next_detection_time = 0.0
         self.min_detection_interval = 1.0 / self.detection_frequency
         
         # Statistics
@@ -317,6 +356,8 @@ class DexiYoloOnnxNode(Node):
             y2 = min(1, (cy + h / 2) * scale_y / orig_h)
 
             class_name = self.class_names[max_score_idx]
+            if class_name in self.exclude_classes:
+                continue
             bbox = [float(x1), float(y1), float(x2), float(y2)]
 
             detection_obj = YoloDetection(class_name, float(confidence), bbox)
@@ -337,8 +378,8 @@ class DexiYoloOnnxNode(Node):
         """Callback for incoming compressed images"""
         current_time = time.time()
         
-        # Check if enough time has passed since last detection
-        if current_time - self.last_detection_time < self.min_detection_interval:
+        # Skip frames until the next detection is due
+        if current_time < self.next_detection_time:
             return
         
         self.frame_count += 1
@@ -373,7 +414,13 @@ class DexiYoloOnnxNode(Node):
                         f"(inf: {avg_inference:.1f}ms, pre: {avg_preprocess:.1f}ms, post: {avg_postprocess:.1f}ms)"
                     )
             
-            self.last_detection_time = current_time
+            # Stay on a fixed schedule rather than "interval since the last frame used". On a
+            # throttled input (a frame every 1/6 s, say) the old rule waited for the first frame
+            # after the interval and ran ~7% below detection_frequency. After a stall, restart.
+            if current_time - self.next_detection_time < self.min_detection_interval:
+                self.next_detection_time += self.min_detection_interval
+            else:
+                self.next_detection_time = current_time + self.min_detection_interval
             
         except Exception as e:
             self.get_logger().error(f"Error processing image: {e}")
@@ -389,7 +436,13 @@ class DexiYoloOnnxNode(Node):
             
             # Run inference
             start_time = time.time()
-            outputs = self.session.run([self.output_name], {self.input_name: input_tensor})
+            if self.ncnn_net is not None:
+                ex = self.ncnn_net.create_extractor()
+                ex.input('in0', self.ncnn_mat(input_tensor[0]))
+                _, out = ex.extract('out0')
+                outputs = [np.array(out)[None]]  # (1, 4 + classes, anchors), as onnxruntime returns
+            else:
+                outputs = self.session.run([self.output_name], {self.input_name: input_tensor})
             inference_time = time.time() - start_time
             self.total_inference_time += inference_time
             

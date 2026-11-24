@@ -16,6 +16,9 @@ Usage:
 
     # Pi CM4
     ros2 launch dexi_yolo yolo_onnx_launch.py num_threads:=1 detection_frequency:=1.0
+
+    # NCNN instead of onnxruntime (fp16 on ARM, ~2.5x faster on a CM5)
+    ros2 launch dexi_yolo yolo_onnx_launch.py backend:=ncnn
 """
 
 import os
@@ -46,6 +49,7 @@ def resolve(context, *args, **kwargs):
         classes = classes or ','.join(p['classes'])
         input_size = input_size or str(p['input_size'])
         confidence = confidence or str(p['confidence'])
+        exclude = ','.join(p.get('exclude', []))
     else:
         model_path = model
         if not classes:
@@ -55,6 +59,7 @@ def resolve(context, *args, **kwargs):
             )
         input_size = input_size or '320'
         confidence = confidence or '0.5'
+        exclude = ''
 
     return [
         LogInfo(msg='dexi_yolo: %s -> %s (%s classes, %sx%s, conf %s)'
@@ -74,6 +79,8 @@ def resolve(context, *args, **kwargs):
                 'num_threads': int(cfg('num_threads')),
                 'nms_threshold': float(cfg('nms_threshold')),
                 'use_letterbox': cfg('use_letterbox').lower() in ('true', '1'),
+                'backend': cfg('backend'),
+                'exclude_classes': cfg('exclude_classes') if cfg('exclude_classes') != 'profile' else exclude,
             }],
         ),
     ]
@@ -117,9 +124,21 @@ def generate_launch_description():
             description='Non-Maximum Suppression threshold (lower = stricter filtering)'
         ),
         DeclareLaunchArgument(
+            'exclude_classes',
+            default_value='profile',
+            description="Comma-separated classes never published; 'profile' uses the model profile's exclude list"
+        ),
+        DeclareLaunchArgument(
             'use_letterbox',
             default_value='true',
             description='Use letterbox preprocessing (preserves aspect ratio)'
+        ),
+
+        DeclareLaunchArgument(
+            'backend',
+            default_value='onnx',
+            description="'onnx' (onnxruntime) or 'ncnn' (needs the pip package ncnn and "
+                        "<model>_ncnn_model/ next to the .onnx)"
         ),
 
         OpaqueFunction(function=resolve),
