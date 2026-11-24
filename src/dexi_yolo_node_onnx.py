@@ -50,6 +50,9 @@ class DexiYoloOnnxNode(Node):
         self.declare_parameter('verbose_logging', False)  # Enable verbose detection logging
         self.declare_parameter('max_detections', 10)  # Maximum detections to keep (limits processing)
         self.declare_parameter('class_names', 'car,motorcycle,truck,bird,cat,dog')  # Comma-separated class names
+        # Comma-separated classes never published (e.g. AVR 'blackout'). A box whose top
+        # class is excluded is dropped, not relabelled as its next-best class.
+        self.declare_parameter('exclude_classes', '')
         
         # Get parameters
         self.model_path = self.get_parameter('model_path').value
@@ -104,10 +107,13 @@ class DexiYoloOnnxNode(Node):
             # Class names from parameter (comma-separated)
             class_names_str = self.get_parameter('class_names').value
             self.class_names = [name.strip() for name in class_names_str.split(',')]
+            self.exclude_classes = {c.strip() for c in self.get_parameter('exclude_classes').value.split(',') if c.strip()}
             
             self.get_logger().info("Optimized ONNX model loaded successfully!")
             self.get_logger().info(f"Input: {self.input_name}, Output: {self.output_name}")
             self.get_logger().info(f"Classes: {self.class_names}")
+            if self.exclude_classes:
+                self.get_logger().info(f"Excluded (never published): {sorted(self.exclude_classes)}")
             self.get_logger().info(f"CPU threads: intra={self.num_threads}, inter=1")
             
         except Exception as e:
@@ -317,6 +323,8 @@ class DexiYoloOnnxNode(Node):
             y2 = min(1, (cy + h / 2) * scale_y / orig_h)
 
             class_name = self.class_names[max_score_idx]
+            if class_name in self.exclude_classes:
+                continue
             bbox = [float(x1), float(y1), float(x2), float(y2)]
 
             detection_obj = YoloDetection(class_name, float(confidence), bbox)

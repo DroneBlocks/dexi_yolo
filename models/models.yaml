@@ -10,6 +10,9 @@ avr_2026:
   input_size: 320
   confidence: 0.45
   classes: [wheat_barrel, water_barrel, gasoline, toxic_fluid, wheat_barn, water_barn, bridge_1line, bridge_2line, bridge_3line, blackout]
+  # Detected but never published: blackout targets cause more trouble than they
+  # solve on the AVR field. Launch with exclude_classes:='' to publish them.
+  exclude: [blackout]
 
 avr_2025:
   # AVR 2025 field objects. yolov8n fine-tuned from DroneBlocks/dexi_yolo_training.
